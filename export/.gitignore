@@ -1,0 +1,9 @@
+# Lake build artifacts
+.lake/
+lake-manifest.json
+*.olean
+
+# transient work dirs / modules used by test/lean/diff_exec.sh
+.diff-*/
+DiffProg.lean
+DiffProg.olean

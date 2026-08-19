@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Generate matched Rocq and Lean test batteries for CC.Integers.
+
+Emits, in the same order, one value per line from:
+  - int_diff.v    (uses CompCert's real lib/Integers.v)
+  - IntDiff.lean  (uses export/CCLib/Integers.lean)
+so the two outputs can be diffed directly.  Any divergence is a transcription
+bug in the Lean port (or a deliberate, documented difference).
+"""
+import os
+
+VALS = [0, 1, -1, 2, -2, 3, -3, 7, -7, 42, -42, 255, 256, 65535, 65536,
+        2147483647, -2147483648, 4294967295, 1000000007, -1000000007]
+# Shift/extension amounts
+AMTS = [0, 1, 7, 8, 15, 16, 31, 32, 33]
+
+# (coq_op, lean_op, arity)  — binary ops reported via signed and unsigned
+BIN = ["add", "sub", "mul", "divs", "mods", "divu", "modu",
+       "and", "or", "xor", "mulhu", "mulhs"]
+UN = ["neg", "not", "notbool"]
+BOOLBIN = ["eq", "lt", "ltu"]
+CMPS = ["Ceq", "Cne", "Clt", "Cle", "Cgt", "Cge"]
+
+coq, lean = [], []
+
+
+def emit(cq, ln):
+    coq.append(cq)
+    lean.append(ln)
+
+
+def z(v):
+    """Coq/Lean literal: negatives need parens."""
+    return f"({v})" if v < 0 else str(v)
+
+
+def battery(M, cM, bits):
+    """M = Lean namespace, cM = Coq module."""
+    # unary
+    for op in UN:
+        for a in VALS:
+            emit(f"Compute {cM}.signed ({cM}.{op} ({cM}.repr {z(a)})).",
+                 f"#eval {M}.signed ({M}.{op} ({M}.repr {z(a)}))")
+    # repr round-trip, both projections
+    for a in VALS:
+        emit(f"Compute {cM}.unsigned ({cM}.repr {z(a)}).",
+             f"#eval {M}.unsigned ({M}.repr {z(a)})")
+        emit(f"Compute {cM}.signed ({cM}.repr {z(a)}).",
+             f"#eval {M}.signed ({M}.repr {z(a)})")
+    # binary arithmetic / bitwise
+    for op in BIN:
+        for a in VALS:
+            for b in VALS:
+                emit(f"Compute {cM}.signed ({cM}.{op} ({cM}.repr {z(a)}) ({cM}.repr {z(b)})).",
+                     f"#eval {M}.signed ({M}.{op} ({M}.repr {z(a)}) ({M}.repr {z(b)}))")
+    # shifts / rotates (amount from the AMTS list)
+    for op in ["shl", "shru", "shr", "rol", "ror"]:
+        for a in VALS:
+            for s in AMTS:
+                emit(f"Compute {cM}.signed ({cM}.{op} ({cM}.repr {z(a)}) ({cM}.repr {z(s)})).",
+                     f"#eval {M}.signed ({M}.{op} ({M}.repr {z(a)}) ({M}.repr {z(s)}))")
+    # zero/sign extension: Coq takes a Z, Lean takes a Nat
+    for op in ["zero_ext", "sign_ext"]:
+        for a in VALS:
+            for n in AMTS:
+                emit(f"Compute {cM}.signed ({cM}.{op} {z(n)} ({cM}.repr {z(a)})).",
+                     f"#eval {M}.signed ({M}.{op} {n} ({M}.repr {z(a)}))")
+    # boolean comparisons
+    for op in BOOLBIN:
+        for a in VALS:
+            for b in VALS:
+                emit(f"Compute {cM}.{op} ({cM}.repr {z(a)}) ({cM}.repr {z(b)}).",
+                     f"#eval {M}.{op} ({M}.repr {z(a)}) ({M}.repr {z(b)})")
+    for c in CMPS:
+        for op in ["cmp", "cmpu"]:
+            for a in VALS:
+                for b in VALS:
+                    emit(f"Compute {cM}.{op} {c} ({cM}.repr {z(a)}) ({cM}.repr {z(b)}).",
+                         f"#eval {M}.{op} Comparison.{c} ({M}.repr {z(a)}) ({M}.repr {z(b)})")
+
+
+battery("Integers.Int", "Int", 32)
+battery("Integers.Int64", "Int64", 64)
+
+# Ptrofs + Int64 word surgery + cross conversions
+for a in VALS:
+    emit(f"Compute Ptrofs.unsigned (Ptrofs.repr {z(a)}).",
+         f"#eval Integers.Ptrofs.unsigned (Integers.Ptrofs.repr {z(a)})")
+    emit(f"Compute Ptrofs.signed (Ptrofs.repr {z(a)}).",
+         f"#eval Integers.Ptrofs.signed (Integers.Ptrofs.repr {z(a)})")
+    emit(f"Compute Int.unsigned (Ptrofs.to_int (Ptrofs.repr {z(a)})).",
+         f"#eval Integers.Int.unsigned (Integers.Ptrofs.to_int (Integers.Ptrofs.repr {z(a)}))")
+    emit(f"Compute Ptrofs.unsigned (Ptrofs.of_int (Int.repr {z(a)})).",
+         f"#eval Integers.Ptrofs.unsigned (Integers.Ptrofs.of_int (Integers.Int.repr {z(a)}))")
+    emit(f"Compute Ptrofs.unsigned (Ptrofs.of_ints (Int.repr {z(a)})).",
+         f"#eval Integers.Ptrofs.unsigned (Integers.Ptrofs.of_ints (Integers.Int.repr {z(a)}))")
+    emit(f"Compute Int64.unsigned (Ptrofs.to_int64 (Ptrofs.repr {z(a)})).",
+         f"#eval Integers.Int64.unsigned (Integers.Ptrofs.to_int64 (Integers.Ptrofs.repr {z(a)}))")
+    emit(f"Compute Int.unsigned (Int64.loword (Int64.repr {z(a)})).",
+         f"#eval Integers.Int.unsigned (Integers.Int64.loword (Integers.Int64.repr {z(a)}))")
+    emit(f"Compute Int.unsigned (Int64.hiword (Int64.repr {z(a)})).",
+         f"#eval Integers.Int.unsigned (Integers.Int64.hiword (Integers.Int64.repr {z(a)}))")
+for a in VALS:
+    for b in VALS:
+        emit(f"Compute Int64.unsigned (Int64.ofwords (Int.repr {z(a)}) (Int.repr {z(b)})).",
+             f"#eval Integers.Int64.unsigned (Integers.Int64.ofwords (Integers.Int.repr {z(a)}) (Integers.Int.repr {z(b)}))")
+
+here = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(here, "int_diff.v"), "w") as f:
+    f.write("(* GENERATED by gen_int_diff.py -- differential test oracle *)\n")
+    f.write("From compcert Require Import Integers.\n")
+    f.write("Require Import ZArith.\n")
+    f.write("Local Open Scope Z_scope.\n")
+    f.write("Set Printing Width 200.\n\n")
+    f.write("\n".join(coq) + "\n")
+
+with open(os.path.join(here, "IntDiff.lean"), "w") as f:
+    f.write("-- GENERATED by gen_int_diff.py -- differential test subject\n")
+    f.write("import CCLib.Integers\nopen CC\n\n")
+    f.write("\n".join(lean) + "\n")
+
+print(f"{len(coq)} test cases")

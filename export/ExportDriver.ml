@@ -29,6 +29,8 @@ let tool_name = "CompCert AST generator"
 type export_mode = Mode_Csyntax | Mode_Clight
 let option_mode = ref Mode_Clight
 let option_normalize = ref false
+(* Emit Lean 4 instead of Rocq/Coq (AST-only, proof-of-concept; Clight mode). *)
+let option_lean = ref false
 
 (* Export the CompCert Csyntax AST *)
 
@@ -57,10 +59,14 @@ let export_clight sourcename csyntax ofile =
       fatal_error loc "%a" print_error msg in
   (* Dump Clight in C syntax if requested *)
   PrintClight.print_if_2 clight;
-  (* Print Clight in Coq syntax *)
+  (* Print Clight in Coq or Lean syntax *)
   let oc = open_out ofile in
-  ExportClight.print_program (Format.formatter_of_out_channel oc)
-                             clight sourcename !option_normalize;
+  if !option_lean then
+    ExportLeanClight.print_program (Format.formatter_of_out_channel oc)
+                                   clight sourcename !option_normalize
+  else
+    ExportClight.print_program (Format.formatter_of_out_channel oc)
+                               clight sourcename !option_normalize;
   close_out oc
 
 (* From C source to exported AST *)
@@ -74,12 +80,17 @@ let compile_c_file sourcename ifile ofile =
   set_dest PrintClight.destination option_dclight ".light.c";
   let cs = parse_c_file sourcename ifile in
   match !option_mode with
-  | Mode_Csyntax -> export_csyntax sourcename cs ofile
+  | Mode_Csyntax ->
+      if !option_lean then
+        fatal_error (file_loc sourcename)
+          "Lean output (-lean) is only supported for Clight (-clight)";
+      export_csyntax sourcename cs ofile
   | Mode_Clight  -> export_clight sourcename cs ofile
 
 let output_filename sourcename  =
   let prefixname = Filename.remove_extension sourcename in
-  output_filename_default (prefixname ^ ".v")
+  let ext = if !option_lean then ".lean" else ".v" in
+  output_filename_default (prefixname ^ ext)
 
 (* Processing of a .c file *)
 
@@ -113,6 +124,7 @@ Recognized source files:
 Processing options:
   -clight        Produce Clight AST  [default]
   -csyntax       Produce Csyntax AST
+  -lean          Emit Lean 4 instead of Rocq/Coq (AST only; -clight only)
   -normalize     Normalize the generated Clight code w.r.t. loads in expressions
   -canonical-idents  Use canonical numbers to represent identifiers  (default)
   -short-idents  Use small, non-canonical numbers to represent identifiers
@@ -161,6 +173,7 @@ let cmdline_actions =
  [
   Exact "-csyntax", Unit (fun () -> option_mode := Mode_Csyntax);
   Exact "-clight", Unit (fun () -> option_mode := Mode_Clight);
+  Exact "-lean", Set option_lean;
   Exact "-E", Set option_E;
   Exact "-normalize", Set option_normalize;
   Exact "-canonical-idents", Set Camlcoq.use_canonical_atoms;

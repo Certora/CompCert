@@ -1,0 +1,58 @@
+name = "compcert-clight-lean"
+# Lake project for the Lean side of the `clightgen -lean` work.
+#
+#   CCLib         : Phase 0 foundations — Archi, machine integers on BitVec,
+#                   floats by bit pattern.  CCLib.Integers is validated against
+#                   CompCert's own lib/Integers.v by test/lean/int_diff.sh.
+#   Clightdefs    : the Clight AST (mirror of Clightdefs.v / Ctypesdefs.v),
+#                   built on CCLib.
+#   Demo          : a representative generated file (every construct)
+#   GenMain       : the generated AST of main.c (contains f_is_sorted)
+#   ClightSem     : a small big-step model for a Clight fragment.  TOY — not
+#                   CompCert's semantics; slated for replacement (Phases 3-4).
+#   SemCheck      : sanity checks for the Phase-3 semantics (init_mem runs on a
+#                   generated program; the Step relation is inhabited)
+#   RunMain       : executes the program generated from main.c (Phase-4 interpreter)
+#   RunIsSorted   : runs the generated is_sorted on concrete arrays
+#   IsSortedProof : is_sorted returns 1 on sorted input, under ClightSem.
+#                   SUPERSEDED by IsSortedReal (kept for comparison).
+#   IsSortedReal  : the Phase-6 milestone — the SAME theorem against the real
+#                   Clight semantics, via the Hoare logic in CCLib.Hoare.
+#   IsSortedRealCheck : discharges IsSortedReal's hypotheses for a concrete
+#                   3-element array, so the milestone is provably non-vacuous.
+#
+# Build with:  lake build
+defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedRealCheck", "SemCheck", "RunMain", "RunIsSorted"]
+
+[[lean_lib]]
+name = "CCLib"
+
+[[lean_lib]]
+name = "Clightdefs"
+
+[[lean_lib]]
+name = "Demo"
+
+[[lean_lib]]
+name = "GenMain"
+
+[[lean_lib]]
+name = "ClightSem"
+
+[[lean_lib]]
+name = "IsSortedProof"
+
+[[lean_lib]]
+name = "IsSortedReal"
+
+[[lean_lib]]
+name = "IsSortedRealCheck"
+
+[[lean_lib]]
+name = "SemCheck"
+
+[[lean_lib]]
+name = "RunMain"
+
+[[lean_lib]]
+name = "RunIsSorted"
