@@ -59,6 +59,17 @@ name = "compcert-clight-lean"
 #   ZLink         : Phase-9 Step 1 (Wave C) — all nine zlib translation units
 #                   linked into ONE Program via CCLib.Linking, with the
 #                   cross-module calls shown to resolve to Internal bodies
+#   GenLocalVar   : generated AST of test/lean/localvar.c (a stack-allocated
+#                   struct local — the compress2/uncompress2 shape)
+#   LocalVarSep   : Phase-9 Wave-D item 6 — entry/exit resource transfer for a
+#                   function with fn_vars, exercised end to end
+#   GenGotoLeave  : generated AST of test/lean/gotoleave.c (inflate's control
+#                   shape: a loop bailing out to one top-level cleanup label)
+#   GotoSep       : Phase-9 Wave-E item 4 — the forward-goto rules exercised on it
+#   GenGotoBack   : generated AST of test/lean/gotoback.c (inffast's shape: a
+#                   loop built from a BACKWARD goto, no Sloop at all)
+#   GotoBackSep   : Phase-9 Wave-E item 6 — the measure-carrying backward-goto
+#                   rule exercised on it
 #   FuncPtrSep    : Phase-9 Step 7 — calls through function pointers, in all
 #                   three shapes clightgen emits (direct, via a temporary, and
 #                   `(*p)(…)` through a struct field, which is zlib's ZALLOC).
@@ -66,7 +77,7 @@ name = "compcert-clight-lean"
 #                   meeting a spec.
 #
 # Build with:  lake build
-defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedSep", "GenSwap", "SwapSep", "GenStruct", "StructSep", "IsSortedRealCheck", "MemCheck", "SepCheck", "SemCheck", "RunMain", "RunIsSorted", "GenAdler32", "ZAdler32", "ZAdler32Check", "TempsCheck", "GenFuncPtr", "FuncPtrSep", "GenDeflate", "DeflateMeasure", "GenTreeSep", "TreeSep", "GenZCompress", "GenZUncompr", "GenZInflate", "GenZTrees", "GenZInftrees", "GenZInffast", "GenZZutil", "ZLink"]
+defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedSep", "GenSwap", "SwapSep", "GenStruct", "StructSep", "IsSortedRealCheck", "MemCheck", "SepCheck", "SemCheck", "RunMain", "RunIsSorted", "GenAdler32", "ZAdler32", "ZAdler32Check", "TempsCheck", "GenFuncPtr", "FuncPtrSep", "GenDeflate", "DeflateMeasure", "GenTreeSep", "TreeSep", "GenZCompress", "GenZUncompr", "GenZInflate", "GenZTrees", "GenZInftrees", "GenZInffast", "GenZZutil", "ZLink", "GenLocalVar", "LocalVarSep", "GenGotoLeave", "GotoSep", "GenGotoBack", "GotoBackSep"]
 
 [[lean_lib]]
 name = "CCLib"
@@ -175,3 +186,21 @@ name = "GenZZutil"
 
 [[lean_lib]]
 name = "ZLink"
+
+[[lean_lib]]
+name = "GenLocalVar"
+
+[[lean_lib]]
+name = "LocalVarSep"
+
+[[lean_lib]]
+name = "GenGotoLeave"
+
+[[lean_lib]]
+name = "GotoSep"
+
+[[lean_lib]]
+name = "GenGotoBack"
+
+[[lean_lib]]
+name = "GotoBackSep"

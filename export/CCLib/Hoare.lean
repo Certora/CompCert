@@ -75,12 +75,45 @@ abbrev Assn := Env → TempEnv → Mem → Prop
 /-- The unsatisfiable assertion, used for exits a statement cannot take. -/
 def Assn.no : Assn := fun _ _ _ => False
 
-/-- The four ways a Clight statement can finish. -/
+/-- The **five** ways a Clight statement can finish.  `Goto` was added in Phase 9
+    Wave E: `inflate` reaches its cleanup through 37 `goto inf_leave`s, and a
+    jump is not any of the other four exits.
+
+    Like `Break`/`Continue`, a `Goto` outcome means "control is *at* the jump" —
+    the state is the `Sgoto` statement itself, and no step has been taken.  The
+    jump is resolved later, by `Sep.triple_body_goto`, at the level where
+    `findLabel` can be evaluated (see there for why that level is the body). -/
 inductive Outcome where
   | Normal (e : Env) (le : TempEnv) (m : Mem)
   | Break (e : Env) (le : TempEnv) (m : Mem)
   | Continue (e : Env) (le : TempEnv) (m : Mem)
   | Return (v : Val) (m : Mem)
+  | Goto (lbl : Ident) (e : Env) (le : TempEnv) (m : Mem)
+
+/-- Where a `goto lbl` lands: `Step.goto` resolves the label with
+    `findLabel lbl f.fn_body (callCont k)`.
+
+    **The jump is folded into the outcome's state, not left in front of it.**  The
+    alternative — letting a `Goto` outcome sit *at* the `Sgoto` statement, as
+    `Break` sits at `Sbreak` — does not propagate: a `Sbreak` under `Kseq s2 k`
+    can step to `k` (`step_break_seq`), but there is no corresponding rule for
+    `Sgoto`, because Clight resolves a goto in one step from wherever it stands.
+
+    Folding the jump in works because `callCont` **ignores** exactly the frames
+    the structural rules push — `Kseq`, `Kloop1`, `Kloop2`, `Kswitch` — all four
+    by `rfl`.  So this state is literally the same under `k` and under
+    `Kseq s2 k`, and a `Goto` outcome propagates out of a sequence, loop or
+    switch with no work at all.
+
+    The `none` case cannot arise for a program C accepted (a `goto` needs a label
+    in scope).  It is mapped to the goto stuck at `callCont k` — note *not* at
+    `k`, which would reintroduce the dependence on the pushed frames and destroy
+    the invariance the whole design rests on. -/
+def gotoTarget (f : Function) (k : Cont) (lbl : Ident) (e : Env) (le : TempEnv)
+    (m : Mem) : State :=
+  match findLabel lbl f.fn_body (callCont k) with
+  | some (s', k') => .State f s' k' e le m
+  | none => .State f (.Sgoto lbl) (callCont k) e le m
 
 /-- The state an outcome corresponds to, under continuation `k`.  Note `Return`
     pops to `callCont k`, exactly as `step_return_*` does. -/
@@ -89,6 +122,18 @@ def Outcome.state (f : Function) (k : Cont) : Outcome → State
   | .Break e le m => .State f .Sbreak k e le m
   | .Continue e le m => .State f .Scontinue k e le m
   | .Return v m => .Returnstate v (callCont k) m
+  | .Goto lbl e le m => gotoTarget f k lbl e le m
+
+/-- A goto's landing site does not depend on the frames a structural rule pushed:
+    all four hold by `rfl`, which is what makes `Goto` propagate for free. -/
+theorem gotoTarget_kseq (f k lbl e le m) (s2 : Stmt) :
+    gotoTarget f (.Kseq s2 k) lbl e le m = gotoTarget f k lbl e le m := rfl
+theorem gotoTarget_kloop1 (f k lbl e le m) (a b : Stmt) :
+    gotoTarget f (.Kloop1 a b k) lbl e le m = gotoTarget f k lbl e le m := rfl
+theorem gotoTarget_kloop2 (f k lbl e le m) (a b : Stmt) :
+    gotoTarget f (.Kloop2 a b k) lbl e le m = gotoTarget f k lbl e le m := rfl
+theorem gotoTarget_kswitch (f k lbl e le m) :
+    gotoTarget f (.Kswitch k) lbl e le m = gotoTarget f k lbl e le m := rfl
 
 /-- Postconditions: one assertion per exit kind. -/
 structure ExitConds where
@@ -103,6 +148,9 @@ def ExitConds.holds (R : ExitConds) : Outcome → Prop
   | .Break e le m => R.brk e le m
   | .Continue e le m => R.cont e le m
   | .Return v m => R.ret v m
+  -- This logic is SUPERSEDED and has no `goto` condition: a jump is simply not
+  -- one of its outcomes.  Wave E's real support lives in `CCLib/SepHoare.lean`.
+  | .Goto _ _ _ _ => False
 
 /-- Only-normal-exit postconditions. -/
 def ExitConds.only (Q : Assn) : ExitConds :=
@@ -150,6 +198,7 @@ theorem triple_conseq (ge fe f) {P P' : Assn} {s} {R R' : ExitConds}
   | Break e' le' m' => exact hb _ _ _ hR
   | Continue e' le' m' => exact hc _ _ _ hR
   | Return v m' => exact hr _ _ hR
+  | Goto _ _ _ _ => exact False.elim hR
 
 /-- Existential precondition: prove the triple for each witness.  Used to peel
     the `∃ i` off a loop invariant so the body proof can name the index. -/
@@ -214,6 +263,7 @@ theorem triple_seq (ge fe f) (P Q : Assn) (R : ExitConds) (s1 s2 : Stmt)
       -- `callCont (Kseq s2 k) = callCont k`, so the endpoint is already right
       refine ⟨.Return v m', ?_, hR1⟩
       exact Steps.trans (Steps.one hstart) hs1
+  | Goto _ _ _ _ => exact False.elim hR1
 
 /-- Conditional.  The caller says which branch the state takes — that is what a
     `forward`-style tactic knows at the point it steps over an `if`, and it avoids
@@ -350,6 +400,7 @@ theorem triple_loop (ge fe f) (R : ExitConds) (I J : Nat → Assn) (s1 s2 : Stmt
             refine ⟨.Return v m2, ?_, hR2⟩
             refine Steps.trans (Steps.one hstart) (Steps.trans hs1 ?_)
             exact Steps.step _ _ _ hto2 hs2
+        | Goto _ _ _ _ => exact False.elim hR2
     | Continue e1 le1 m1 =>
         have hto2 : SStep ge fe (.State f .Scontinue (.Kloop1 s1 s2 k) e1 le1 m1)
                              (.State f s2 (.Kloop2 s1 s2 k) e1 le1 m1) :=
@@ -373,6 +424,7 @@ theorem triple_loop (ge fe f) (R : ExitConds) (I J : Nat → Assn) (s1 s2 : Stmt
             refine ⟨.Return v m2, ?_, hR2⟩
             refine Steps.trans (Steps.one hstart) (Steps.trans hs1 ?_)
             exact Steps.step _ _ _ hto2 hs2
+        | Goto _ _ _ _ => exact False.elim hR2
     | Break e1 le1 m1 =>
         refine ⟨.Normal e1 le1 m1, ?_, hR1⟩
         refine Steps.trans (Steps.one hstart) (Steps.trans hs1 ?_)
@@ -380,5 +432,6 @@ theorem triple_loop (ge fe f) (R : ExitConds) (I J : Nat → Assn) (s1 s2 : Stmt
     | Return v m1 =>
         refine ⟨.Return v m1, ?_, hR1⟩
         exact Steps.trans (Steps.one hstart) hs1
+    | Goto _ _ _ _ => exact False.elim hR1
 
 end CC

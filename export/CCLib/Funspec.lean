@@ -137,6 +137,10 @@ theorem satisfies_internal_noVars (ge fe f) (S : FunSpec) (vargs : List Val)
   | Normal _ _ _ => exact False.elim hR
   | Break _ _ _ => exact False.elim hR
   | Continue _ _ _ => exact False.elim hR
+  -- an unresolved jump out of a function body: the body triple's `goto`
+  -- condition is `no`, so this cannot happen.  A body that *does* jump must have
+  -- had its labels resolved by `Sep.triple_body_goto` first.
+  | Goto _ _ _ _ => exact False.elim hR
   | Return v m' =>
       refine ⟨v, m', hp', ?_, hR, hd', hag'⟩
       -- the body returns to `callCont k`; on a call continuation that *is* `k`
@@ -145,6 +149,260 @@ theorem satisfies_internal_noVars (ge fe f) (S : FunSpec) (vargs : List Val)
       rw [callCont_of_isCallCont hk] at hs'
       exact Steps.step _ _ _
         (Step.internal_function f vargs k m emptyEnv le m hent) hs'
+
+/-- **D5 — a function *with* block-scoped locals meets its spec.**  The
+    generalisation of `satisfies_internal_noVars`, and what
+    `compress2`/`uncompress2` need: both hold a `z_stream` on the stack.
+
+    `hentry` is the entry step packaged as an obligation: running
+    `function_entry` yields an environment, temporaries, a memory, **and a
+    fragment `hl` for the freshly allocated locals**, with the body's
+    precondition holding of the caller's resources *plus* the locals.
+    `CC.allocVariables_resources` is what discharges it.
+
+    The body's `ret` condition is `S.post` alone — no locals — because the
+    `return` step frees them: `Sep.triple_return` already carries
+    `Mem.freeList … = some m'` as a hypothesis, discharged at the use site by
+    `CC.freeList_isSome_of_rangePerm` and `CC.undefBytes_rangePerm`.  So the
+    locals are *consumed* by the return, and this theorem needs to say nothing
+    more about them. -/
+theorem satisfies_internal (ge fe f) (S : FunSpec) (vargs : List Val)
+    (Pbody : Assn)
+    (hentry : ∀ (m : Mem) (hp hf : Heap), S.pre vargs hp → Heap.disjoint hp hf →
+        Heap.Agrees (Heap.union hp hf) m →
+        ∃ (e : Env) (le : TempEnv) (m1 : Mem) (hl : Heap),
+          fe f vargs m e le m1
+          ∧ Heap.disjoint (Heap.union hp hl) hf
+          ∧ Heap.Agrees (Heap.union (Heap.union hp hl) hf) m1
+          ∧ Pbody e le (Heap.union hp hl))
+    (body : Triple ge fe f Pbody f.fn_body
+        { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := S.post }) :
+    SatisfiesAt ge fe (.Internal f) S vargs := by
+  intro k m hp hf hk hpre hd hag
+  obtain ⟨e, le, m1, hl, hent, hd1, hag1, hPb⟩ := hentry m hp hf hpre hd hag
+  obtain ⟨o, hp', hs, hd', hag', hR⟩ :=
+    body k e le (Heap.union hp hl) hf m1 hd1 hag1 hPb
+  cases o with
+  | Normal _ _ _ => exact False.elim hR
+  | Break _ _ _ => exact False.elim hR
+  | Continue _ _ _ => exact False.elim hR
+  -- an unresolved jump out of a function body: the body triple's `goto`
+  -- condition is `no`, so this cannot happen.  A body that *does* jump must have
+  -- had its labels resolved by `Sep.triple_body_goto` first.
+  | Goto _ _ _ _ => exact False.elim hR
+  | Return v m' =>
+      refine ⟨v, m', hp', ?_, hR, hd', hag'⟩
+      have hs' : Steps (SStep ge fe) (.State f f.fn_body k e le m1)
+                   (.Returnstate v (callCont k) m') := hs
+      rw [callCont_of_isCallCont hk] at hs'
+      exact Steps.step _ _ _
+        (Step.internal_function f vargs k m e le m1 hent) hs'
+
+/-- **Resolving a forward `goto`: a function whose body jumps to a label.**
+
+    This is `satisfies_internal` plus label resolution, and it must live at this
+    level rather than as a `Triple` rule: `Step.goto` lands at `callCont k`, a
+    `Triple` quantifies over *all* `k`, and only here — where `SatisfiesAt`
+    supplies `isCallCont k` — are the two the same continuation.
+
+    `hfind` gives the label's landing site as a function `kcont` of the ambient
+    continuation.  For a label at the **top level** of the body — `inflate`'s
+    `inf_leave:` — `kcont` is the identity.  For a label *inside* a sequence or
+    loop, `findLabel` rebuilds the frames above it, so `kcont` adds them; `hkc`
+    then says those frames do not change `callCont`, which holds by `rfl` for
+    every frame `findLabel` can add (`Kseq`, `Kloop1`, `Kloop2`, `Kswitch`).
+    Both facts compute on a concrete body.
+
+    The target is verified with `goto := no`, so it cannot jump again — that is
+    what makes this the *forward* rule, and it is the restriction a backward jump
+    (`inflate_fast`'s `dolen`/`dodist`) has to lift with a measure. -/
+theorem satisfies_internal_goto (ge fe f) (S : FunSpec) (vargs : List Val)
+    (Pbody G : Assn) (lbl : Ident) (starget : Stmt) (kcont : Cont → Cont)
+    (hentry : ∀ (m : Mem) (hp hf : Heap), S.pre vargs hp → Heap.disjoint hp hf →
+        Heap.Agrees (Heap.union hp hf) m →
+        ∃ (e : Env) (le : TempEnv) (m1 : Mem) (hl : Heap),
+          fe f vargs m e le m1
+          ∧ Heap.disjoint (Heap.union hp hl) hf
+          ∧ Heap.Agrees (Heap.union (Heap.union hp hl) hf) m1
+          ∧ Pbody e le (Heap.union hp hl))
+    (hbody : Triple ge fe f Pbody f.fn_body
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := S.post,
+        goto := fun l => if l = lbl then G else Assn.no })
+    (hfind : ∀ kk : Cont, findLabel lbl f.fn_body kk = some (starget, kcont kk))
+    (hkc : ∀ kk : Cont, callCont (kcont kk) = callCont kk)
+    (htarget : Triple ge fe f G starget
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := S.post }) :
+    SatisfiesAt ge fe (.Internal f) S vargs := by
+  intro k m hp hf hk hpre hd hag
+  have hck : callCont k = k := callCont_of_isCallCont hk
+  obtain ⟨e, le, m1, hl, hent, hd1, hag1, hPb⟩ := hentry m hp hf hpre hd hag
+  obtain ⟨o, hp', hs, hd', hag', hR⟩ :=
+    hbody k e le (Heap.union hp hl) hf m1 hd1 hag1 hPb
+  -- the body either returns, or jumps to `lbl` and the target returns
+  cases o with
+  | Normal _ _ _ => exact False.elim hR
+  | Break _ _ _ => exact False.elim hR
+  | Continue _ _ _ => exact False.elim hR
+  | Return v m' =>
+      refine ⟨v, m', hp', ?_, hR, hd', hag'⟩
+      have hs' : Steps (SStep ge fe) (.State f f.fn_body k e le m1)
+                   (.Returnstate v (callCont k) m') := hs
+      rw [hck] at hs'
+      exact Steps.step _ _ _ (Step.internal_function f vargs k m e le m1 hent) hs'
+  | Goto lbl' e' le' m' =>
+      by_cases hl' : lbl' = lbl
+      · subst hl'
+        have hG : G e' le' hp' := by
+          have hx : (if lbl' = lbl' then G else Assn.no) e' le' hp' := hR
+          rwa [if_pos rfl] at hx
+        -- the landing site: `callCont k = k`, so the jump stays under `kcont k`
+        have hst : gotoTarget f k lbl' e' le' m'
+            = .State f starget (kcont k) e' le' m' := by
+          unfold gotoTarget
+          rw [hck, hfind k]
+        obtain ⟨o2, hp2, hs2, hd2, hag2, hR2⟩ :=
+          htarget (kcont k) e' le' hp' hf m' hd' hag' hG
+        cases o2 with
+        | Normal _ _ _ => exact False.elim hR2
+        | Break _ _ _ => exact False.elim hR2
+        | Continue _ _ _ => exact False.elim hR2
+        | Goto _ _ _ _ => exact False.elim hR2
+        | Return v m'' =>
+            refine ⟨v, m'', hp2, ?_, hR2, hd2, hag2⟩
+            have hs2' : Steps (SStep ge fe) (.State f starget (kcont k) e' le' m')
+                          (.Returnstate v (callCont (kcont k)) m'') := hs2
+            rw [hkc k, hck] at hs2'
+            refine Steps.step _ _ _
+              (Step.internal_function f vargs k m e le m1 hent) ?_
+            exact Steps.trans (hst ▸ hs) hs2'
+      · -- a jump to any other label is unsatisfiable: the body's condition is `no`
+        have hx : (if lbl' = lbl then G else Assn.no) e' le' hp' := hR
+        rw [if_neg hl'] at hx
+        exact False.elim hx
+
+/-- **Resolving a `goto` that jumps BACKWARD, with a measure.**
+
+    `inflate_fast`'s `dolen`/`dodist` jump *back* to a label above them, so the
+    label's target can jump again and `satisfies_internal_goto` — whose target is
+    verified with `goto := no` — does not apply.
+
+    The fix is the discipline `Sep.triple_loop` and `Sep.closure` already use: the
+    goto-assertion is **indexed by a `Nat` that must strictly decrease** before the
+    label is re-entered.  Well-founded induction on it closes the loop.
+
+    **How big is the measure in practice?  One.**  `dolen`/`dodist` are the
+    two-level Huffman table lookup: a code longer than the root table's bits sends
+    control back through `dolen` with `here` pointing into a *second-level* table,
+    and a second-level entry is never itself a second-level pointer, because zlib
+    builds exactly two levels.  So the jump fires at most once per symbol.
+
+    That is worth stating plainly, because it relocates the difficulty: the
+    *control-flow* rule below is cheap, while the *termination* argument is a
+    data-structure invariant of `inflate_table`'s output — an obligation on
+    inftrees.c that any refinement proof of `inflate_fast` needs anyway.  The
+    measure is where that invariant gets cashed in. -/
+theorem satisfies_internal_goto_measure (ge fe f) (S : FunSpec) (vargs : List Val)
+    (Pbody : Assn) (Gm : Nat → Assn) (lbl : Ident) (starget : Stmt)
+    (kcont : Cont → Cont)
+    (hentry : ∀ (m : Mem) (hp hf : Heap), S.pre vargs hp → Heap.disjoint hp hf →
+        Heap.Agrees (Heap.union hp hf) m →
+        ∃ (e : Env) (le : TempEnv) (m1 : Mem) (hl : Heap),
+          fe f vargs m e le m1
+          ∧ Heap.disjoint (Heap.union hp hl) hf
+          ∧ Heap.Agrees (Heap.union (Heap.union hp hl) hf) m1
+          ∧ Pbody e le (Heap.union hp hl))
+    -- the body may jump to `lbl` at any measure
+    (hbody : Triple ge fe f Pbody f.fn_body
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := S.post,
+        goto := fun l => if l = lbl then (fun e le hp => ∃ n, Gm n e le hp)
+                         else Assn.no })
+    (hfind : ∀ kk : Cont, findLabel lbl f.fn_body kk = some (starget, kcont kk))
+    (hkc : ∀ kk : Cont, callCont (kcont kk) = callCont kk)
+    -- …and the target, at measure `n`, either returns or jumps again at a
+    -- **strictly smaller** measure
+    (htarget : ∀ n : Nat, Triple ge fe f (Gm n) starget
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := S.post,
+        goto := fun l => if l = lbl then (fun e le hp => ∃ n', n' < n ∧ Gm n' e le hp)
+                         else Assn.no }) :
+    SatisfiesAt ge fe (.Internal f) S vargs := by
+  intro k m hp hf hk hpre hd hag
+  have hck : callCont k = k := callCont_of_isCallCont hk
+  -- the target, re-entered at a decreasing measure, always reaches a Returnstate
+  have key : ∀ (n : Nat) (e : Env) (le : TempEnv) (hp' : Heap) (m' : Mem),
+      Gm n e le hp' → Heap.disjoint hp' hf →
+      Heap.Agrees (Heap.union hp' hf) m' →
+      ∃ v m'' hp'',
+        Steps (SStep ge fe) (.State f starget (kcont k) e le m')
+          (.Returnstate v k m'')
+        ∧ S.post v hp'' ∧ Heap.disjoint hp'' hf
+        ∧ Heap.Agrees (Heap.union hp'' hf) m'' := by
+    intro n
+    induction n using Nat.strongRecOn with
+    | _ n ih =>
+      intro e le hp' m' hG hd' hag'
+      obtain ⟨o, hp2, hs, hd2, hag2, hR⟩ :=
+        htarget n (kcont k) e le hp' hf m' hd' hag' hG
+      cases o with
+      | Normal _ _ _ => exact False.elim hR
+      | Break _ _ _ => exact False.elim hR
+      | Continue _ _ _ => exact False.elim hR
+      | Return v m'' =>
+          refine ⟨v, m'', hp2, ?_, hR, hd2, hag2⟩
+          have hs' : Steps (SStep ge fe) (.State f starget (kcont k) e le m')
+                       (.Returnstate v (callCont (kcont k)) m'') := hs
+          rwa [hkc k, hck] at hs'
+      | Goto lbl' e2 le2 m2 =>
+          by_cases hl' : lbl' = lbl
+          · subst hl'
+            obtain ⟨n', hlt, hG'⟩ : ∃ n', n' < n ∧ Gm n' e2 le2 hp2 := by
+              have hx : (if lbl' = lbl' then
+                          (fun e le hp => ∃ n', n' < n ∧ Gm n' e le hp) else Assn.no)
+                        e2 le2 hp2 := hR
+              rwa [if_pos rfl] at hx
+            -- re-enter the label at the smaller measure
+            obtain ⟨v, m'', hp3, hs3, hpost, hd3, hag3⟩ := ih n' hlt e2 le2 hp2 m2 hG' hd2 hag2
+            refine ⟨v, m'', hp3, ?_, hpost, hd3, hag3⟩
+            have hst : gotoTarget f (kcont k) lbl' e2 le2 m2
+                = .State f starget (kcont k) e2 le2 m2 := by
+              unfold gotoTarget; rw [hkc k, hck, hfind k]
+            exact Steps.trans (hst ▸ hs) hs3
+          · have hx : (if lbl' = lbl then
+                        (fun e le hp => ∃ n', n' < n ∧ Gm n' e le hp) else Assn.no)
+                      e2 le2 hp2 := hR
+            rw [if_neg hl'] at hx
+            exact False.elim hx
+  -- now the body: it returns, or jumps to `lbl` at some measure
+  obtain ⟨e, le, m1, hl, hent, hd1, hag1, hPb⟩ := hentry m hp hf hpre hd hag
+  obtain ⟨o, hp', hs, hd', hag', hR⟩ :=
+    hbody k e le (Heap.union hp hl) hf m1 hd1 hag1 hPb
+  cases o with
+  | Normal _ _ _ => exact False.elim hR
+  | Break _ _ _ => exact False.elim hR
+  | Continue _ _ _ => exact False.elim hR
+  | Return v m' =>
+      refine ⟨v, m', hp', ?_, hR, hd', hag'⟩
+      have hs' : Steps (SStep ge fe) (.State f f.fn_body k e le m1)
+                   (.Returnstate v (callCont k) m') := hs
+      rw [hck] at hs'
+      exact Steps.step _ _ _ (Step.internal_function f vargs k m e le m1 hent) hs'
+  | Goto lbl' e' le' m' =>
+      by_cases hl' : lbl' = lbl
+      · subst hl'
+        obtain ⟨n, hG⟩ : ∃ n, Gm n e' le' hp' := by
+          have hx : (if lbl' = lbl' then (fun e le hp => ∃ n, Gm n e le hp)
+                     else Assn.no) e' le' hp' := hR
+          rwa [if_pos rfl] at hx
+        obtain ⟨v, m'', hp2, hs2, hpost, hd2, hag2⟩ := key n e' le' hp' m' hG hd' hag'
+        refine ⟨v, m'', hp2, ?_, hpost, hd2, hag2⟩
+        have hst : gotoTarget f k lbl' e' le' m'
+            = .State f starget (kcont k) e' le' m' := by
+          unfold gotoTarget; rw [hck, hfind k]
+        refine Steps.step _ _ _ (Step.internal_function f vargs k m e le m1 hent) ?_
+        exact Steps.trans (hst ▸ hs) hs2
+      · have hx : (if lbl' = lbl then (fun e le hp => ∃ n, Gm n e le hp)
+                   else Assn.no) e' le' hp' := hR
+        rw [if_neg hl'] at hx
+        exact False.elim hx
 
 /-- The specifications a body may *use*: everything in the table whose measure at
     the actual arguments is strictly below `n`. -/

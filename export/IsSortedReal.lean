@@ -411,6 +411,8 @@ theorem is_sorted_star (hd : Distinct) (hL0 : 0 ≤ L) (hL : L < 2147483648)
   | Normal _ _ _ => exact False.elim hR
   | Break _ _ _ => exact False.elim hR
   | Continue _ _ _ => exact False.elim hR
+  -- `is_sorted` contains no `goto`, so this outcome is unsatisfiable
+  | Goto _ _ _ _ => exact False.elim hR
   | Return v m =>
       obtain ⟨hv, hm⟩ := hR
       subst hv; subst hm

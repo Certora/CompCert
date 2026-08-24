@@ -40,6 +40,7 @@ def outMem : Outcome → Mem
   | .Break _ _ m => m
   | .Continue _ _ m => m
   | .Return _ m => m
+  | .Goto _ _ _ m => m
 
 /-- Postconditions, one per exit kind.  `ret` is heap-only: a returning function
     has no local environment left to describe. -/
@@ -48,12 +49,20 @@ structure ExitConds where
   brk : Assn
   cont : Assn
   ret : Val → HProp
+  /-- **Wave E**: one assertion per label the statement may jump to.  The field
+      carries a **default**, so every `ExitConds` literal written before Wave E
+      still elaborates unchanged — 21 of them across this file, `Funspec`,
+      `IsSortedReal`, `IsSortedSep` and `ZAdler32`.  That is what kept the
+      `Outcome` extension to 14 match arms instead of a file-wide rewrite.
+      (`Sep.Assn.no` is defined just below, so the default is spelled out.) -/
+  goto : Ident → Assn := fun _ _ _ _ => False
 
 def ExitConds.holds (R : ExitConds) : Outcome → Heap → Prop
   | .Normal e le _, hp => R.normal e le hp
   | .Break e le _, hp => R.brk e le hp
   | .Continue e le _, hp => R.cont e le hp
   | .Return v _, hp => R.ret v hp
+  | .Goto lbl e le _, hp => R.goto lbl e le hp
 
 /-- The unsatisfiable assertion, for exits a statement cannot take. -/
 def Assn.no : Assn := fun _ _ _ => False
@@ -89,7 +98,12 @@ theorem triple_conseq (ge fe f) {P P' : Assn} {s} {R R' : ExitConds}
     (hn : ∀ e le hp, R.normal e le hp → R'.normal e le hp)
     (hb : ∀ e le hp, R.brk e le hp → R'.brk e le hp)
     (hc : ∀ e le hp, R.cont e le hp → R'.cont e le hp)
-    (hr : ∀ v hp, R.ret v hp → R'.ret v hp) :
+    (hr : ∀ v hp, R.ret v hp → R'.ret v hp)
+    -- Wave E: a trailing `autoParam`, so the 9 pre-existing call sites of this
+    -- rule are untouched.  The default closes the two cases that actually occur:
+    -- the goto conditions are the same, or the source has none.
+    (hg : ∀ lbl e le hp, R.goto lbl e le hp → R'.goto lbl e le hp := by
+      intro _ _ _ _ hgg; first | exact hgg | exact hgg.elim) :
     Triple ge fe f P' s R' := by
   intro k e le hp hf m hd hag hP'
   obtain ⟨o, hp', hs, hd', hag', hR⟩ := h k e le hp hf m hd hag (hP e le hp hP')
@@ -98,6 +112,7 @@ theorem triple_conseq (ge fe f) {P P' : Assn} {s} {R R' : ExitConds}
   | Normal _ _ _ => exact hn _ _ _ hR
   | Break _ _ _ => exact hb _ _ _ hR
   | Continue _ _ _ => exact hc _ _ _ hR
+  | Goto _ _ _ _ => exact hg _ _ _ _ hR
   | Return _ _ => exact hr _ _ hR
 
 theorem triple_exists {α : Sort u} (ge fe f) (P : α → Assn) (s : Stmt) (R : ExitConds)
@@ -136,6 +151,11 @@ theorem triple_seq (ge fe f) (P Q : Assn) (R : ExitConds) (s1 s2 : Stmt)
                             (.State f s1 (.Kseq s2 k) e le m) := Step.seq f s1 s2 k e le m
   obtain ⟨o1, hp1, hs1, hd1, hag1, hR1⟩ := h1 (.Kseq s2 k) e le hp hf m hd hag hP
   cases o1 with
+  | Goto lbl e' le' m' =>
+      -- `gotoTarget` ignores the `Kseq` frame (`gotoTarget_kseq`, by `rfl`), so
+      -- s1's landing site *is* the sequence's landing site
+      exact ⟨.Goto lbl e' le' m', hp1, Steps.trans (Steps.one hstart) hs1,
+             hd1, hag1, hR1⟩
   | Normal e' le' m' =>
       obtain ⟨o2, hp2, hs2, hd2, hag2, hR2⟩ := h2 k e' le' hp1 hf m' hd1 hag1 hR1
       refine ⟨o2, hp2, ?_, hd2, hag2, hR2⟩
@@ -237,7 +257,8 @@ exactly C's fall-through-or-break behaviour.
 
 theorem triple_switch (ge fe f) (P : Assn) (R : ExitConds) (a : Expr) (sl : LStmts)
     (hbody : ∀ n : Z, Triple ge fe f P (seqOfLabeledStatement (selectSwitch n sl))
-      { normal := R.normal, brk := R.normal, cont := R.cont, ret := R.ret })
+      { normal := R.normal, brk := R.normal, cont := R.cont, ret := R.ret,
+        goto := R.goto })
     (hsel : ∀ e le hp m, P e le hp → Heap.Agrees hp m →
             ∃ v n, EvalExpr ge e le m a v ∧ Cop.semSwitchArg v (typeof a) = some n) :
     Triple ge fe f P (.Sswitch a sl) R := by
@@ -250,6 +271,10 @@ theorem triple_switch (ge fe f) (P : Assn) (R : ExitConds) (a : Expr) (sl : LStm
   obtain ⟨o, hp', hs, hd', hag', hR⟩ :=
     hbody n (.Kswitch k) e le hp hf m hd hag hP
   cases o with
+  | Goto lbl e' le' m' =>
+      -- `gotoTarget` ignores the `Kswitch` frame, so the landing site is unchanged
+      exact ⟨.Goto lbl e' le' m', hp', Steps.trans (Steps.one hstart) hs,
+             hd', hag', hR⟩
   | Normal e' le' m' =>
       -- `Sskip` under `Kswitch` leaves the switch
       refine ⟨.Normal e' le' m', hp', ?_, hd', hag', hR⟩
@@ -277,10 +302,11 @@ threads through exactly as in `triple_seq`. -/
 
 theorem triple_loop (ge fe f) (R : ExitConds) (I J : Nat → Assn) (s1 s2 : Stmt)
     (hbody : ∀ n, Triple ge fe f (I n) s1
-      { normal := J n, brk := R.normal, cont := J n, ret := R.ret })
+      { normal := J n, brk := R.normal, cont := J n, ret := R.ret,
+        goto := R.goto })
     (hincr : ∀ n, Triple ge fe f (J n) s2
       { normal := fun e le hp => ∃ n', n' < n ∧ I n' e le hp,
-        brk := R.normal, cont := Assn.no, ret := R.ret }) :
+        brk := R.normal, cont := Assn.no, ret := R.ret, goto := R.goto }) :
     ∀ n, Triple ge fe f (I n) (.Sloop s1 s2) R := by
   intro n
   induction n using Nat.strongRecOn with
@@ -306,6 +332,12 @@ theorem triple_loop (ge fe f) (R : ExitConds) (I J : Nat → Assn) (s1 s2 : Stmt
       obtain ⟨o2, hp2, hs2, hd2, hag2, hR2⟩ :=
         hincr n (.Kloop2 s1 s2 k) e1 le1 hpm hf m1 hdm hagm hJ
       cases o2 with
+      | Goto lbl e2 le2 m2 =>
+          -- `gotoTarget` ignores `Kloop2`
+          exact ⟨.Goto lbl e2 le2 m2, hp2,
+                 Steps.trans (Steps.one hstart)
+                   (Steps.trans hreach (Steps.step _ _ _ hto2 hs2)),
+                 hd2, hag2, hR2⟩
       | Normal e2 le2 m2 =>
           obtain ⟨n', hlt, hI'⟩ := hR2
           obtain ⟨o, hp3, hs3, hd3, hag3, hR3⟩ := ih n' hlt k e2 le2 hp2 hf m2 hd2 hag2 hI'
@@ -332,6 +364,62 @@ theorem triple_loop (ge fe f) (R : ExitConds) (I J : Nat → Assn) (s1 s2 : Stmt
         exact Steps.one (Step.break_loop1 f s1 s2 k e1 le1 m1)
     | Return v m1 =>
         exact ⟨.Return v m1, hp1, Steps.trans (Steps.one hstart) hs1, hd1, hag1, hR1⟩
+    | Goto lbl e1 le1 m1 =>
+        -- `gotoTarget` ignores `Kloop1`
+        exact ⟨.Goto lbl e1 le1 m1, hp1, Steps.trans (Steps.one hstart) hs1,
+               hd1, hag1, hR1⟩
+
+/-! ## `goto` and `label` — Phase 9 Wave E
+
+`Step.label` just unwraps.  `Sgoto` is the interesting one: because the jump is
+folded into the outcome's state (see `CC.gotoTarget`), `triple_goto` *is* the
+single `Step.goto`, and the label is resolved later by `triple_body_goto`. -/
+
+/-- A label is transparent: `Step.label` steps straight into its body. -/
+theorem triple_label (ge fe f) (P : Assn) (lbl : Ident) (s : Stmt) (R : ExitConds)
+    (h : Triple ge fe f P s R) : Triple ge fe f P (.Slabel lbl s) R := by
+  intro k e le hp hf m hd hag hP
+  obtain ⟨o, hp', hs, hd', hag', hR⟩ := h k e le hp hf m hd hag hP
+  exact ⟨o, hp', Steps.step _ _ _ (Step.label f lbl s k e le m) hs, hd', hag', hR⟩
+
+/-- **`goto lbl`.**  Exits with the `Goto` outcome, whose state is already the
+    post-jump state — so the single `Step.goto` *is* the whole proof.
+
+    `hres` says the label exists.  It is not red tape: a `goto` to a label not in
+    the function has no rule, which is right, because C rejects such a program.
+    Note the hypothesis is over an arbitrary continuation, which is sound because
+    `findLabel`'s *success* depends only on `f.fn_body` — the continuation is
+    merely threaded through. -/
+theorem triple_goto (ge fe f) (P : Assn) (lbl : Ident)
+    (hres : ∀ kk : Cont, ∃ s' k', findLabel lbl f.fn_body kk = some (s', k')) :
+    Triple ge fe f P (.Sgoto lbl)
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := fun _ _ => False,
+        goto := fun l => if l = lbl then P else Assn.no } := by
+  intro k e le hp hf m hd hag hP
+  refine ⟨.Goto lbl e le m, hp, ?_, hd, hag, ?_⟩
+  · show Steps (SStep ge fe) (.State f (.Sgoto lbl) k e le m)
+           (gotoTarget f k lbl e le m)
+    obtain ⟨s', k', hfl⟩ := hres (callCont k)
+    rw [show gotoTarget f k lbl e le m = .State f s' k' e le m from by
+          unfold gotoTarget; rw [hfl]]
+    exact Steps.one (Step.goto f lbl k e le m s' k' hfl)
+  · show (if lbl = lbl then P else Assn.no) e le hp
+    rw [if_pos rfl]
+    exact hP
+
+/-! ### Where a `goto` gets resolved — and why not here
+
+`Step.goto` resolves the label with `findLabel lbl f.fn_body (callCont k)`, so the
+landing continuation is `callCont k`, not `k`.  A `Triple` quantifies over **all**
+`k`, and for a general `k` those differ — so **no `Triple`-shaped rule can
+discharge a jump.**  (This was worth finding out by trying: the first draft of a
+`triple_body_goto` fails on exactly that mismatch.)
+
+The resolution therefore lives one level up, in `CCLib/Funspec.lean`, as
+`Sep.satisfies_internal_goto`: `SatisfiesAt` carries `isCallCont k`, hence
+`callCont k = k`, which is precisely the missing fact.  That is also the right
+level *semantically* — `findLabel` searches `f.fn_body`, so a label is a property
+of the function, not of a statement. -/
 
 /-! ## The frame rule
 
@@ -343,7 +431,8 @@ def ExitConds.frame (R : ExitConds) (Q : HProp) : ExitConds :=
   { normal := fun e le => R.normal e le ∗ Q
     brk := fun e le => R.brk e le ∗ Q
     cont := fun e le => R.cont e le ∗ Q
-    ret := fun v => R.ret v ∗ Q }
+    ret := fun v => R.ret v ∗ Q
+    goto := fun lbl e le => R.goto lbl e le ∗ Q }
 
 /-- **The frame rule.**  Stated for a heap-only `Q`: a general `Assn` frame would
     need VST's modified-variables side condition, since `Sset` changes the
@@ -373,6 +462,7 @@ theorem triple_frame (ge fe f) (P : Assn) (s : Stmt) (R : ExitConds) (Q : HProp)
     | Break _ _ _ => exact hsep _ hR
     | Continue _ _ _ => exact hsep _ hR
     | Return _ _ => exact hsep _ hR
+    | Goto _ _ _ _ => exact hsep _ hR
 
 /-! ## Reading through a fragment
 

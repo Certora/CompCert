@@ -339,6 +339,23 @@ theorem zero_ext8_repr (c : Nat) (h : c < 256) :
       show ((2 ^ 32 - 1 : Nat) >>> (32 - 8)) = 2 ^ 8 - 1 from by rfl,
       Nat.and_two_pow_sub_one_eq_mod, Nat.mod_eq_of_lt (by omega : c < 2 ^ 8)]
 
+/-- 32-bit unsigned equality against a `Nat`.  The `Int64` analogues
+    (`cmpu_eq_nat` and friends) were built for adler32's `unsigned long`
+    arithmetic; this is the `unsigned int` version, which is what an `int`
+    comparison in a C `if` reduces to. -/
+theorem cmpu_eq_nat32 (a b : Nat) (ha : a < 4294967296) (hb : b < 4294967296) :
+    Integers.Int.cmpu .Ceq (Integers.Int.repr ((a : _root_.Int)))
+      (Integers.Int.repr ((b : _root_.Int))) = decide (a = b) := by
+  show (Integers.MI.eq (Integers.Int.repr ((a : _root_.Int)))
+          (Integers.Int.repr ((b : _root_.Int)))) = decide (a = b)
+  by_cases h : a = b
+  · subst h; simp [Integers.MI.eq]
+  · simp only [h, decide_false, Integers.MI.eq, beq_eq_false_iff_ne, ne_eq]
+    intro hc
+    refine h ?_
+    have hx := congrArg (fun x : Integers.Int => x.toNat) hc
+    simpa [u32_toNat_repr, Nat.mod_eq_of_lt ha, Nat.mod_eq_of_lt hb] using hx
+
 /-! ## `arrayU8` — an owned byte buffer
 
 The byte-buffer analogue of `SepLogic.arrayU32`.  Elements are given as `Nat`s

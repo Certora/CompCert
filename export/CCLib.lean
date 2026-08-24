@@ -78,3 +78,4 @@ import CCLib.Temps
 import CCLib.FunPtr
 import CCLib.Aggregate
 import CCLib.Linking
+import CCLib.Locals
