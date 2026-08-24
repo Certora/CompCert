@@ -77,7 +77,7 @@ name = "compcert-clight-lean"
 #                   meeting a spec.
 #
 # Build with:  lake build
-defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedSep", "GenSwap", "SwapSep", "GenStruct", "StructSep", "IsSortedRealCheck", "MemCheck", "SepCheck", "SemCheck", "RunMain", "RunIsSorted", "GenAdler32", "ZAdler32", "ZAdler32Check", "TempsCheck", "GenFuncPtr", "FuncPtrSep", "GenDeflate", "DeflateMeasure", "GenTreeSep", "TreeSep", "GenZCompress", "GenZUncompr", "GenZInflate", "GenZTrees", "GenZInftrees", "GenZInffast", "GenZZutil", "ZLink", "GenLocalVar", "LocalVarSep", "GenGotoLeave", "GotoSep", "GenGotoBack", "GotoBackSep", "InflateMeasure", "ZConfigAudit", "ZAdlerMath"]
+defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedSep", "GenSwap", "SwapSep", "GenStruct", "StructSep", "IsSortedRealCheck", "MemCheck", "SepCheck", "SemCheck", "RunMain", "RunIsSorted", "GenAdler32", "ZAdler32", "ZAdler32Check", "TempsCheck", "GenFuncPtr", "FuncPtrSep", "GenDeflate", "DeflateMeasure", "GenTreeSep", "TreeSep", "GenZCompress", "GenZUncompr", "GenZInflate", "GenZTrees", "GenZInftrees", "GenZInffast", "GenZZutil", "ZLink", "GenLocalVar", "LocalVarSep", "GenGotoLeave", "GotoSep", "GenGotoBack", "GotoBackSep", "InflateMeasure", "ZConfigAudit", "ZAdlerMath", "ZAdlerLoop"]
 
 [[lean_lib]]
 name = "CCLib"
@@ -213,3 +213,6 @@ name = "ZConfigAudit"
 
 [[lean_lib]]
 name = "ZAdlerMath"
+
+[[lean_lib]]
+name = "ZAdlerLoop"

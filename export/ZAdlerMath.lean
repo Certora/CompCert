@@ -133,4 +133,63 @@ theorem sums_closed : ∀ (bs : List Nat) (s : Sums), s.Valid →
       simp only [BASE] at hcg
       congr 1 <;> (simp only [BASE]; omega)
 
+/-! ## Append laws for the unreduced sums
+
+The loop invariant advances one byte at a time, so it needs `sumBytes` and
+`weighted` on `u ++ [c]`.  Both split cleanly; `weighted`'s seed shifts by the
+prefix's byte sum, which is exactly why it is *weighted*. -/
+
+theorem sumBytes_append : ∀ (u v : List Nat),
+    sumBytes (u ++ v) = sumBytes u + sumBytes v
+  | [], _ => by simp only [List.nil_append, sumBytes, Nat.zero_add]
+  | c :: cs, v => by
+      show c + sumBytes (cs ++ v) = (c + sumBytes cs) + sumBytes v
+      rw [sumBytes_append cs v]; omega
+
+theorem weighted_append : ∀ (u : List Nat) (x : Nat) (v : List Nat),
+    weighted x (u ++ v) = weighted x u + weighted (x + sumBytes u) v
+  | [], x, v => by
+      -- `omega` treats `weighted (x + 0) v` and `weighted x v` as distinct
+      -- atoms, so the `+ 0` has to go before it is asked anything
+      simp only [List.nil_append, weighted, sumBytes, Nat.add_zero, Nat.zero_add]
+  | c :: cs, x, v => by
+      show (x + c) + weighted (x + c) (cs ++ v)
+         = ((x + c) + weighted (x + c) cs) + weighted (x + (c + sumBytes cs)) v
+      rw [weighted_append cs (x + c) v,
+          show x + c + sumBytes cs = x + (c + sumBytes cs) from by omega]
+      omega
+
+/-! ## The consumed prefix
+
+`arrayU8` describes a buffer by an index function, while the model wants a list.
+`bytesOf f k` is the bridge: the first `k` bytes, built so that extending by one
+is `rfl`. -/
+
+/-- The first `k` bytes of the buffer described by `f`. -/
+def bytesOf (f : Nat → Nat) : Nat → List Nat
+  | 0 => []
+  | k + 1 => bytesOf f k ++ [f k]
+
+theorem bytesOf_succ (f : Nat → Nat) (k : Nat) :
+    bytesOf f (k + 1) = bytesOf f k ++ [f k] := rfl
+
+/-- **The one-byte advance, in the form the loop invariant needs.**  `adler`
+    gains the new byte; `sum2` gains the *new* `adler`.  That is literally the
+    two statements in adler32.c's inner loop. -/
+theorem step_unreduced (f : Nat → Nat) (k : Nat) (s1 : Nat) :
+    sumBytes (bytesOf f (k + 1)) = sumBytes (bytesOf f k) + f k
+    ∧ weighted s1 (bytesOf f (k + 1))
+        = weighted s1 (bytesOf f k) + (s1 + sumBytes (bytesOf f k) + f k) := by
+  refine ⟨?_, ?_⟩
+  · rw [bytesOf_succ, sumBytes_append]
+    show sumBytes (bytesOf f k) + (f k + 0) = _
+    omega
+  · rw [bytesOf_succ, weighted_append]
+    show weighted s1 (bytesOf f k)
+           + ((s1 + sumBytes (bytesOf f k)) + f k
+              + weighted ((s1 + sumBytes (bytesOf f k)) + f k) []) = _
+    show weighted s1 (bytesOf f k)
+           + ((s1 + sumBytes (bytesOf f k)) + f k + 0) = _
+    omega
+
 end ZAdlerMath
