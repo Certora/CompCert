@@ -125,6 +125,90 @@ theorem triple_set_local (ge fe f) (E : Env) (l₀ l : List (Ident × Val)) (H :
   exact ⟨v, hev le m hp hT hH hag, rfl,
          TempsHold_set hne (TempsHold_mono hsub hT), hH⟩
 
+/-! ## Forward chaining: computing the post-state instead of supplying it
+
+`triple_set_local` above makes the **caller** supply the pruned list `l` and
+prove `hsub`/`hne` about it.  That is what makes a chain of assignments expensive:
+`ZAdlerLoop.work_step` spent 117 of its 356 lines writing out five mid-condition
+lists, each repeating the invariant's entries, with two side conditions apiece.
+
+The fix is not a tactic but a definition.  If the pruned list is **computed** from
+`l₀` and `id`, then `hsub` and `hne` stop being obligations and become theorems,
+proved once here.  The tactic at the end of this section then just chains the
+resulting rule and never mentions a list at all. -/
+
+/-- `l` with `id`'s entry removed.  A `filter`, so `List.mem_filter` gives both of
+    `triple_set_local`'s side conditions immediately. -/
+def dropId (id : Ident) (l : List (Ident × Val)) : List (Ident × Val) :=
+  l.filter (fun q => q.1 != id)
+
+/-- The tracked list after `id = …`.  **Computed**, not supplied. -/
+def setLocal (l : List (Ident × Val)) (id : Ident) (v : Val) : List (Ident × Val) :=
+  (id, v) :: dropId id l
+
+@[simp] theorem dropId_nil (id : Ident) : dropId id [] = [] := rfl
+
+@[simp] theorem dropId_cons (id : Ident) (q : Ident × Val)
+    (qs : List (Ident × Val)) :
+    dropId id (q :: qs)
+      = if q.1 = id then dropId id qs else q :: dropId id qs := by
+  show List.filter _ (q :: qs) = _
+  rw [List.filter_cons]
+  by_cases h : q.1 = id
+  · simp [dropId, h]
+  · simp [dropId, h]
+
+@[simp] theorem setLocal_eq (l : List (Ident × Val)) (id : Ident) (v : Val) :
+    setLocal l id v = (id, v) :: dropId id l := rfl
+
+/-- Both of `triple_set_local`'s side conditions, in one lemma. -/
+theorem mem_dropId {id : Ident} {l : List (Ident × Val)} {q : Ident × Val}
+    (h : q ∈ dropId id l) : q ∈ l ∧ q.1 ≠ id := by
+  rw [dropId, List.mem_filter] at h
+  exact ⟨h.1, by simpa using h.2⟩
+
+/-- **`id = a;` with the post-state computed.**  Compare `triple_set_local`: no
+    pruned list to write down and no side conditions to discharge, so a use site
+    is the `hev` proof and nothing else.
+
+    Named `_local_fwd` because `CCLib.Tactics.triple_set_fwd` is the *raw*-`Assn`
+    forward rule.  That one computes its post as `∃ le0, le = le0.set id …`, which
+    accumulates one existential per assignment — exactly the growth `LocalSt` was
+    introduced to avoid.  This is its tracked-list counterpart, and the assertion
+    stays flat. -/
+theorem triple_set_local_fwd (ge fe f) (E : Env) (l : List (Ident × Val)) (H : HProp)
+    (id : Ident) (a : Expr) (v : Val)
+    (hev : ∀ le m hp, TempsHold l le → H hp → Heap.Agrees hp m →
+             EvalExpr ge E le m a v) :
+    Triple ge fe f (LocalSt E l H) (.Sset id a)
+      (.only (LocalSt E (setLocal l id v) H)) :=
+  triple_set_local ge fe f E l (dropId id l) H id a v
+    (fun _ hq => (mem_dropId hq).1) (fun _ hq => (mem_dropId hq).2) hev
+
+/-- Reading a temporary back out of a `setLocal` chain.  The head case is the one
+    that matters: a temporary is usually read on the statement right after it is
+    written. -/
+theorem mem_setLocal_head (l : List (Ident × Val)) (id : Ident) (v : Val) :
+    (id, v) ∈ setLocal l id v := List.mem_cons_self
+
+theorem mem_setLocal_of_mem {l : List (Ident × Val)} {id : Ident} {v : Val}
+    {q : Ident × Val} (hq : q ∈ l) (hne : q.1 ≠ id) : q ∈ setLocal l id v := by
+  refine List.mem_cons_of_mem _ ?_
+  rw [dropId, List.mem_filter]
+  exact ⟨hq, by simpa using hne⟩
+
+/-- The same, with the entry **split into its identifier and value**.
+
+    This is the form `temps_get` must use, and the reason is the standing `decide`
+    trap: `q.1 ≠ id` on a pair whose *value* mentions free variables is a goal
+    `decide` refuses, even though only the first projection matters.  Splitting the
+    pair in the statement puts two concrete identifiers in front of `decide` and
+    keeps the free variables in `qv`, where nothing looks at them. -/
+theorem mem_setLocal_of_mem' {l : List (Ident × Val)} {id : Ident} {v : Val}
+    {qid : Ident} {qv : Val} (hq : (qid, qv) ∈ l) (hne : qid ≠ id) :
+    (qid, qv) ∈ setLocal l id v :=
+  mem_setLocal_of_mem hq hne
+
 /-- `if (a) … else …` where the guard's value is *known*.  Instantiating `bb` at
     `true`/`false` reduces the `if`, so this subsumes
     `triple_if_true`/`triple_if_false` without duplicating them. -/
@@ -209,5 +293,38 @@ macro "temps_mem" : tactic =>
       | simp
       | decide
       | assumption)
+
+/-- **Chain a whole tree of assignments.**
+
+    Walks `Ssequence`/`Sset` structure applying `triple_seq_fwd` and
+    `triple_set_local_fwd`, and leaves exactly one goal per assignment: its `hev`
+    obligation, which is the only part that is not bookkeeping.  Every
+    mid-condition is *computed* by `setLocal`, so no tracked list appears in the
+    proof text.
+
+    It stops at any statement that is not a sequence or an assignment — an `if`, a
+    call, a loop — leaving that `Triple` as a goal for the caller.  That is the
+    intended behaviour, not a limitation: those are the steps that need thought.
+
+    Terminates because each application strictly shrinks the statement, so
+    `any_goals` eventually finds no `Triple` goal to make progress on. -/
+macro "localst_fwd" : tactic =>
+  `(tactic| repeat (any_goals (first
+      | apply CC.Sep.triple_seq_fwd
+      | apply CC.Sep.triple_set_local_fwd)))
+
+/-- Reads a tracked temporary out of a `setLocal` chain.
+
+    **Peels the chain structurally rather than `simp`ing the membership.**  That
+    matters: `simp` turns `q ∈ setLocal …` into a disjunction of pairwise
+    equalities and then cannot finish, because the tracked *values* contain free
+    variables so `decide` rejects the whole goal.  `mem_setLocal_of_mem` splits the
+    two halves — the identifier disequality goes to `decide` on its own, where it
+    is closed, and the membership recurses. -/
+macro "temps_get" : tactic =>
+  `(tactic| repeat (first
+      | exact CC.Sep.mem_setLocal_head _ _ _
+      | refine CC.Sep.mem_setLocal_of_mem' ?_ (by decide)
+      | temps_mem))
 
 end CC.Sep

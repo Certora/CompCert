@@ -12,6 +12,11 @@
   It also pins the thing that made it possible: `temps_ne` is kernel `decide`,
   which works only because `identOfString` reduces (see `CCLib.Positive`).  If
   that regresses, this file fails rather than silently falling back.
+
+  The second half of the file covers `localst_fwd`, which extends the same claim
+  from a single step to a **chain** of them: the mid-conditions are computed by
+  `setLocal` rather than written out, so an N-assignment chain costs N `EvalExpr`
+  obligations and no tracked lists at all.
 -/
 import GenAdler32
 import CCLib
@@ -69,5 +74,72 @@ example (b : Block) (ofs0 : Integers.Ptrofs) :
     theorem. -/
 example : _adler ≠ _sum2 := by decide
 example : _t'17 ≠ _t'7 := by decide
+
+/-! ## `localst_fwd`: the mid-conditions are computed, not written
+
+The Step-10 layer made a single step O(1) in the number of tracked temporaries.
+What it did *not* do was make a **chain** of steps cheap: `triple_seq_fwd` takes
+its mid-condition explicitly, so an N-assignment chain cost N tracked lists
+written out by hand.  `ZAdlerLoop.work_step` measured that at 117 of 356 lines.
+
+`localst_fwd` (`CCLib.Temps`) closes it: `setLocal` computes the post-state, so
+`triple_set_local`'s `hsub`/`hne` become theorems and a chain leaves exactly one
+goal per assignment — its `EvalExpr` obligation, the only part that is not
+bookkeeping.  It cut `work_step` from 117 lines to 57.
+
+The checks below pin the three things that can regress. -/
+
+/-- **A four-assignment chain, with no tracked list written anywhere.**  Contrast
+    the twenty-temporary `Sset` example above, which needed the list once; a chain
+    used to need it once *per assignment*.  Here the postcondition is stated as the
+    `setLocal` chain the tactic computes, so the values are inferred too. -/
+example (ge : CGenv) (fe : EntryRel) (f : Function) (b : Block)
+    (ofs0 : Integers.Ptrofs) (H : HProp) :
+    Sep.Triple ge fe f (Sep.LocalSt emptyEnv (wide b ofs0) H)
+      (.Ssequence (.Sset _t'1 (.Econst_long 7 tulong))
+        (.Ssequence (.Sset _t'2 (.Econst_long 8 tulong))
+          (.Ssequence (.Sset _t'3 (.Econst_long 9 tulong))
+                      (.Sset _t'4 (.Econst_long 10 tulong)))))
+      (.only (Sep.LocalSt emptyEnv
+        (Sep.setLocal (Sep.setLocal (Sep.setLocal (Sep.setLocal
+          (wide b ofs0) _t'1 (.Vlong 7)) _t'2 (.Vlong 8))
+          _t'3 (.Vlong 9)) _t'4 (.Vlong 10)) H)) := by
+  localst_fwd
+  all_goals (intro le m hp _ _ _; exact EvalExpr.Econst_long _ _)
+
+/-- **`localst_fwd` stops at a statement it does not own.**  The `if` is left as a
+    goal — that is the design, not a gap: a branch is where a decision has to be
+    made.  Here the two assignments before it are still chained automatically. -/
+example (ge : CGenv) (fe : EntryRel) (f : Function) (b : Block)
+    (ofs0 : Integers.Ptrofs) (H : HProp) :
+    Sep.Triple ge fe f (Sep.LocalSt emptyEnv (wide b ofs0) H)
+      (.Ssequence (.Sset _t'1 (.Econst_long 7 tulong))
+        (.Ssequence (.Sset _t'2 (.Econst_long 8 tulong))
+          (.Sifthenelse (.Etempvar _t'1 tulong) .Sbreak .Sbreak)))
+      { normal := Sep.Assn.no,
+        brk := Sep.LocalSt emptyEnv
+          (Sep.setLocal (Sep.setLocal (wide b ofs0) _t'1 (.Vlong 7))
+            _t'2 (.Vlong 8)) H,
+        cont := Sep.Assn.no,
+        ret := fun _ _ => False } := by
+  localst_fwd
+  · intro le m hp _ _ _; exact EvalExpr.Econst_long _ _
+  · intro le m hp _ _ _; exact EvalExpr.Econst_long _ _
+  · -- the `if`, left for us: both arms break, so either guard value works
+    refine Sep.triple_if_local ge fe f _ _ _ _ true _ _ _
+      (fun le m hp hT _ _ => ?_) (Sep.triple_break ge fe f _)
+    exact ⟨.Vlong 7, EvalExpr.Etempvar _t'1 tulong _ (hT.get (by temps_get)), rfl⟩
+
+/-- **Reading a temporary back out of a chain**, which is what `temps_get` exists
+    for.  `temps_mem` alone cannot do it: `simp` turns the membership into a
+    disjunction of pairwise equalities and stalls, because the tracked *values*
+    carry free variables so `decide` refuses the goal.  `temps_get` peels the chain
+    with `mem_setLocal_of_mem'` instead, which puts two bare identifiers in front
+    of `decide` and leaves the values alone. -/
+example (b : Block) (ofs0 : Integers.Ptrofs) (le : TempEnv) (v w : Val)
+    (hT : Sep.TempsHold
+      (Sep.setLocal (Sep.setLocal (wide b ofs0) _t'1 v) _t'2 w) le) :
+    le.get _t'2 = some w ∧ le.get _t'1 = some v ∧ le.get _buf = some (.Vptr b ofs0) :=
+  ⟨hT.get (by temps_get), hT.get (by temps_get), hT.get (by temps_get)⟩
 
 end TempsCheck

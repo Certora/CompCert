@@ -329,17 +329,11 @@ def lenWrapped : Val :=
   .Vlong (Integers.Int64.sub (Integers.Int64.repr (((0 : Nat) : _root_.Int)))
     (Integers.Int64.repr (Integers.Int.signed (Integers.Int.repr 1))))
 
-/-- After `t'1 = len`. -/
-abbrev lTest1 : List (Ident × Val) := (_t'1, u 0) :: tracked b ofs0 nTot f s 0
+/-- `while (len--)` at measure 0.
 
-/-- After `len = t'1 - 1`: the stale `len` is dropped and re-added wrapped. -/
-abbrev lTest2 : List (Ident × Val) :=
-  (_len, lenWrapped) ::
-  [(_t'1, u 0),
-   (_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - 0)))),
-   (_adler, u (s.s1 + sumBytes (bytesOf f (nTot - 0)))),
-   (_buf, .Vptr b (ofsAt ofs0 (nTot - 0)))]
-
+    `localst_fwd` chains the two assignments and **stops at the `if`**, which is
+    exactly what it should do — the `if` is the step that needs a decision, and it
+    is the only thing left in the proof text besides two `EvalExpr` goals. -/
 theorem test_break (R : Sep.ExitConds) :
     Triple ge fe f_adler32_z
       (LocalSt emptyEnv (tracked b ofs0 nTot f s 0)
@@ -347,32 +341,24 @@ theorem test_break (R : Sep.ExitConds) :
       loopTest
       { normal := Assn.no, brk := Post p b ofs0 nTot f s,
         cont := Assn.no, ret := R.ret, goto := R.goto } := by
-  refine triple_seq_fwd ge fe f_adler32_z _
-    (LocalSt emptyEnv (lTest2 b ofs0 nTot f s)
-      (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f)) _ _ _ ?_ ?_
-  · refine triple_seq_fwd ge fe f_adler32_z _
-      (LocalSt emptyEnv (lTest1 b ofs0 nTot f s)
-        (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f)) _ _ _ ?_ ?_
-    · refine triple_set_local ge fe f_adler32_z _ _ _ _ _ _ (u 0)
-        (by temps_mem) (by temps_ne) (fun le m hp hT _ _ => ?_)
-      exact EvalExpr.Etempvar _len tulong _ (hT.get (by temps_mem))
-    · refine triple_set_local ge fe f_adler32_z _
-        (lTest1 b ofs0 nTot f s)
-        [(_t'1, u 0),
-         (_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - 0)))),
-         (_adler, u (s.s1 + sumBytes (bytesOf f (nTot - 0)))),
-         (_buf, .Vptr b (ofsAt ofs0 (nTot - 0)))]
-        _ _ _ lenWrapped (by temps_mem) (by temps_ne) (fun le m hp hT _ _ => ?_)
-      refine EvalExpr.Ebinop .Osub _ _ _ (u 0)
-        (.Vint (Integers.Int.repr 1)) _
-        (EvalExpr.Etempvar _t'1 tulong _ (hT.get (by temps_mem)))
-        (EvalExpr.Econst_int _ _) ?_
-      simp only [typeof]
-      exact semBinop_sub_ulong_int _ _ _ _
-  · -- if (t'1) skip else break  —  t'1 is 0, so break
+  localst_fwd
+  · -- t'1 = len
+    intro le m hp hT _ _
+    -- the value is PINNED here, not inferred: this chain's post is discarded by
+    -- the `break`, so nothing in the goal determines it
+    exact EvalExpr.Etempvar _len tulong (u 0) (hT.get (by temps_get))
+  · -- len = t'1 - 1  (wraps; never read)
+    intro le m hp hT _ _
+    refine EvalExpr.Ebinop .Osub _ _ _ (u 0) (.Vint (Integers.Int.repr 1))
+      lenWrapped
+      (EvalExpr.Etempvar _t'1 tulong (u 0) (hT.get (by temps_get)))
+      (EvalExpr.Econst_int _ _) ?_
+    simp only [typeof]
+    exact semBinop_sub_ulong_int _ _ _ _
+  · -- if (t'1) skip else break — t'1 is 0, so break
     refine triple_if_local ge fe f_adler32_z _ _ _ _ false _ _ _
       (fun le m hp hT _ _ => ?_) ?_
-    · refine ⟨u 0, EvalExpr.Etempvar _t'1 tulong _ (hT.get (by temps_mem)), ?_⟩
+    · refine ⟨u 0, EvalExpr.Etempvar _t'1 tulong (u 0) (hT.get (by temps_get)), ?_⟩
       simp only [typeof]
       rw [boolVal_u 0 (by omega)]
       simp
@@ -380,7 +366,16 @@ theorem test_break (R : Sep.ExitConds) :
         (fun e le hp x => x) (fun _ _ _ hx => hx.elim) (fun e le hp hx => ?_)
         (fun _ _ _ hx => hx.elim) (fun _ _ hx => hx.elim)
       obtain ⟨he, hT, hH⟩ := hx
-      exact ⟨he, TempsHold_mono (by temps_mem) hT, hH⟩
+      refine ⟨he, ?_, hH⟩
+      intro q hq
+      simp only [List.mem_cons, List.not_mem_nil, or_false] at hq
+      obtain h | h | h := hq
+      -- `Post` says `bytesOf f nTot`; `tracked … 0` says `bytesOf f (nTot - 0)`.
+      -- Definitionally equal, but `temps_get` matches syntactically.
+      all_goals (subst h
+                 refine hT.get ?_
+                 simp only [tracked, Nat.sub_zero]
+                 temps_get)
 
 /-! ### Measure `m + 1`: the test falls through, the body advances one byte -/
 
@@ -400,49 +395,56 @@ theorem test_pass (m : Nat) (hm : m + 1 ≤ nTot) (hB : Bounds p ofs0 nTot f s) 
       (.only (LocalSt emptyEnv (lPass b ofs0 nTot f s m)
         (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f))) := by
   have hsm := hB.small
-  refine triple_seq_fwd ge fe f_adler32_z _
-    (LocalSt emptyEnv (lPass b ofs0 nTot f s m)
-      (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f)) _ _ _ ?_ ?_
-  · refine triple_seq_fwd ge fe f_adler32_z _
-      (LocalSt emptyEnv ((_t'1, u (m + 1)) :: tracked b ofs0 nTot f s (m + 1))
-        (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f)) _ _ _ ?_ ?_
-    · refine triple_set_local ge fe f_adler32_z _ _ _ _ _ _ (u (m + 1))
-        (by temps_mem) (by temps_ne) (fun le mm hp hT _ _ => ?_)
-      exact EvalExpr.Etempvar _len tulong _ (hT.get (by temps_mem))
-    · refine triple_set_local ge fe f_adler32_z _
-        ((_t'1, u (m + 1)) :: tracked b ofs0 nTot f s (m + 1))
-        [(_t'1, u (m + 1)),
-         (_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1))))),
-         (_adler, u (s.s1 + sumBytes (bytesOf f (nTot - (m + 1))))),
-         (_buf, .Vptr b (ofsAt ofs0 (nTot - (m + 1))))]
-        _ _ _ (u m) (by temps_mem) (by temps_ne) (fun le mm hp hT _ _ => ?_)
-      refine EvalExpr.Ebinop .Osub _ _ _ (u (m + 1))
-        (.Vint (Integers.Int.repr 1)) _
-        (EvalExpr.Etempvar _t'1 tulong _ (hT.get (by temps_mem)))
-        (EvalExpr.Econst_int _ _) ?_
-      simp only [typeof]
-      rw [semBinop_sub_ulong_int, signed_one,
-          show (1 : _root_.Int) = ((1 : Nat) : _root_.Int) from rfl,
-          u64_sub (m + 1) 1 (by omega)]
-      show some (u (m + 1 - 1)) = some (u m)
-      simp
-  · refine triple_if_local ge fe f_adler32_z _ _ _ _ true _ _ _
+  localst_fwd
+  · -- t'1 = len.  Value PINNED: this chain feeds an `if`, so the goal does not
+    -- determine it (see the note on `localst_fwd` at the end of the file).
+    intro le mm hp hT _ _
+    exact EvalExpr.Etempvar _len tulong (u (m + 1)) (hT.get (by temps_get))
+  · -- len = t'1 - 1
+    intro le mm hp hT _ _
+    refine EvalExpr.Ebinop .Osub _ _ _ (u (m + 1))
+      (.Vint (Integers.Int.repr 1)) (u m)
+      (EvalExpr.Etempvar _t'1 tulong (u (m + 1)) (hT.get (by temps_get)))
+      (EvalExpr.Econst_int _ _) ?_
+    simp only [typeof]
+    rw [semBinop_sub_ulong_int, signed_one,
+        show (1 : _root_.Int) = ((1 : Nat) : _root_.Int) from rfl,
+        u64_sub (m + 1) 1 (by omega)]
+    show some (u (m + 1 - 1)) = some (u m)
+    simp
+  · -- if (t'1) skip else break — t'1 is nonzero, so fall through
+    refine triple_if_local ge fe f_adler32_z _ _ _ _ true _ _ _
       (fun le mm hp hT _ _ => ?_) ?_
-    · refine ⟨u (m + 1), EvalExpr.Etempvar _t'1 tulong _ (hT.get (by temps_mem)), ?_⟩
+    · refine ⟨u (m + 1),
+        EvalExpr.Etempvar _t'1 tulong (u (m + 1)) (hT.get (by temps_get)), ?_⟩
       simp only [typeof]
       rw [boolVal_u (m + 1) (by omega)]
       simp
     · exact triple_skip ge fe f_adler32_z _
 
-/-- After the body at measure `m + 1`: one more byte folded in. -/
+/-- After the body at measure `m + 1`: one more byte folded in.
+
+    **One list, and it is the only one in this proof.**  The old version of
+    `work_step` spelled out five mid-condition lists — this is what
+    `localst_fwd` removed.  Note `_t'1` survives here (the old version dropped it
+    by weakening); keeping it is strictly stronger and `body_triple` drops it
+    later anyway. -/
 abbrev lWork (m : Nat) : List (Ident × Val) :=
   [(_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - m)))),
    (_adler, u (s.s1 + sumBytes (bytesOf f (nTot - m)))),
    (_t'39, bt (f (nTot - (m + 1)))),
    (_buf, .Vptr b (ofsAt ofs0 (nTot - m))),
    (_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))),
-   (_len, u m)]
+   (_len, u m),
+   (_t'1, u (m + 1))]
 
+/-- `adler += *buf++; sum2 += adler;`
+
+    Five assignments, and the proof is five `EvalExpr` obligations and nothing
+    else.  `localst_fwd` walks the `Ssequence` tree, computes every
+    mid-condition with `setLocal`, and unifies the last one against `lWork` —
+    which is what fixes the assigned values, so each `hev` goal arrives with its
+    target value already in place. -/
 theorem work_step (m : Nat) (hm : m + 1 ≤ nTot) (hB : Bounds p ofs0 nTot f s) :
     Triple ge fe f_adler32_z
       (LocalSt emptyEnv (lPass b ofs0 nTot f s m)
@@ -452,117 +454,55 @@ theorem work_step (m : Nat) (hm : m + 1 ≤ nTot) (hB : Bounds p ofs0 nTot f s) 
         (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f))) := by
   have hsm := hB.small
   have hft := hB.fits
-  -- `k` is the number already consumed; `k + 1 = nTot - m`
   have hk1 : nTot - (m + 1) + 1 = nTot - m := by omega
   have hklt : nTot - (m + 1) < nTot := by omega
   have hkfit : ofs0.toNat + (nTot - (m + 1)) < 18446744073709551616 := by omega
   have hkfit1 : ofs0.toNat + (nTot - (m + 1)) + 1 < 18446744073709551616 := by omega
   obtain ⟨hsum, hwt⟩ := step_unreduced f (nTot - (m + 1)) s.s1
   rw [hk1] at hsum hwt
-  obtain ⟨hbA, hbS⟩ := acc_bounds p ofs0 nTot f s hB (nTot - (m + 1)) (by omega)
   have hbyte := hB.bytes (nTot - (m + 1))
-  refine triple_seq_fwd ge fe f_adler32_z _
-    (LocalSt emptyEnv
-      ((_adler, u (s.s1 + sumBytes (bytesOf f (nTot - m)))) ::
-       (_t'39, bt (f (nTot - (m + 1)))) ::
-       (_buf, .Vptr b (ofsAt ofs0 (nTot - m))) ::
-       (_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))) ::
-       (_len, u m) ::
-       [(_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1)))))])
-      (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f)) _ _ _ ?_ ?_
-  · -- t'2 = buf; buf = t'2 + 1; t'39 = *t'2; adler += t'39
-    refine triple_seq_fwd ge fe f_adler32_z _
-      (LocalSt emptyEnv
-        ((_buf, .Vptr b (ofsAt ofs0 (nTot - m))) ::
-         (_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))) ::
-         (_len, u m) ::
-         [(_t'1, u (m + 1)),
-          (_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1))))),
-          (_adler, u (s.s1 + sumBytes (bytesOf f (nTot - (m + 1)))))])
-        (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f)) _ _ _ ?_ ?_
-    · -- t'2 = buf; buf = t'2 + 1
-      refine triple_seq_fwd ge fe f_adler32_z _
-        (LocalSt emptyEnv
-          ((_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))) ::
-           lPass b ofs0 nTot f s m)
-          (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f)) _ _ _ ?_ ?_
-      · refine triple_set_local ge fe f_adler32_z _ _ _ _ _ _
-          (.Vptr b (ofsAt ofs0 (nTot - (m + 1))))
-          (by temps_mem) (by temps_ne) (fun le mm hp hT _ _ => ?_)
-        exact EvalExpr.Etempvar _buf (tptr tuchar) _ (hT.get (by temps_mem))
-      · refine triple_set_local ge fe f_adler32_z _
-          ((_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))) ::
-           lPass b ofs0 nTot f s m)
-          ((_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))) ::
-           (_len, u m) ::
-           [(_t'1, u (m + 1)),
-            (_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1))))),
-            (_adler, u (s.s1 + sumBytes (bytesOf f (nTot - (m + 1)))))])
-          _ _ _ (.Vptr b (ofsAt ofs0 (nTot - m)))
-          (by temps_mem) (by temps_ne) (fun le mm hp hT _ _ => ?_)
-        refine EvalExpr.Ebinop .Oadd _ _ _
-          (.Vptr b (ofsAt ofs0 (nTot - (m + 1))))
-          (.Vint (Integers.Int.repr 1)) _
-          (EvalExpr.Etempvar _t'2 (tptr tuchar) _ (hT.get (by temps_mem)))
-          (EvalExpr.Econst_int _ _) ?_
-        simp only [typeof]
-        rw [semAdd_byte, byteOfs_ofsAt _ ofs0 (nTot - (m + 1)) hkfit1, hk1]
-    · -- t'39 = *t'2; adler += t'39
-      refine triple_seq_fwd ge fe f_adler32_z _
-        (LocalSt emptyEnv
-          ((_t'39, bt (f (nTot - (m + 1)))) ::
-           (_buf, .Vptr b (ofsAt ofs0 (nTot - m))) ::
-           (_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))) ::
-           (_len, u m) ::
-           [(_t'1, u (m + 1)),
-            (_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1))))),
-            (_adler, u (s.s1 + sumBytes (bytesOf f (nTot - (m + 1)))))])
-          (arrayU8 p b (Integers.Ptrofs.unsigned ofs0) nTot f)) _ _ _ ?_ ?_
-      · refine triple_set_local ge fe f_adler32_z _ _ _ _ _ _
-          (bt (f (nTot - (m + 1))))
-          (by temps_mem) (by temps_ne) (fun le mm hp hT hH hag => ?_)
-        exact eval_deref_byte (p := p) (ofs0 := ofs0) (n := nTot) (f := f)
-          (k := nTot - (m + 1)) (pid := _t'2) hB.readable hH hag hklt hB.bytes
-          (hT.get (by temps_mem)) (ofsAt_unsigned ofs0 _ hkfit)
-      · refine triple_set_local ge fe f_adler32_z _ _
-          ((_t'39, bt (f (nTot - (m + 1)))) ::
-           (_buf, .Vptr b (ofsAt ofs0 (nTot - m))) ::
-           (_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))) ::
-           (_len, u m) ::
-           [(_sum2, u (s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1)))))])
-          _ _ _ (u (s.s1 + sumBytes (bytesOf f (nTot - m))))
-          (by temps_mem) (by temps_ne) (fun le mm hp hT _ _ => ?_)
-        refine EvalExpr.Ebinop .Oadd _ _ _
-          (u (s.s1 + sumBytes (bytesOf f (nTot - (m + 1)))))
-          (bt (f (nTot - (m + 1)))) _
-          (EvalExpr.Etempvar _adler tulong _ (hT.get (by temps_mem)))
-          (EvalExpr.Etempvar _t'39 tuchar _ (hT.get (by temps_mem))) ?_
-        simp only [typeof]
-        have hnat : s.s1 + sumBytes (bytesOf f (nTot - (m + 1))) + f (nTot - (m + 1))
-                  = s.s1 + sumBytes (bytesOf f (nTot - m)) := by rw [hsum]; omega
-        rw [semBinop_add_ulong_uchar, u32_unsigned _ (by omega), u64_add, hnat]
-  · -- sum2 += adler
-    refine triple_set_local ge fe f_adler32_z _ _
-      ((_adler, u (s.s1 + sumBytes (bytesOf f (nTot - m)))) ::
-       (_t'39, bt (f (nTot - (m + 1)))) ::
-       (_buf, .Vptr b (ofsAt ofs0 (nTot - m))) ::
-       (_t'2, .Vptr b (ofsAt ofs0 (nTot - (m + 1)))) ::
-       [(_len, u m)])
-      _ _ _ (u (s.s2 + weighted s.s1 (bytesOf f (nTot - m))))
-      (by temps_mem) (by temps_ne) (fun le mm hp hT _ _ => ?_)
+  localst_fwd
+  · -- t'2 = buf
+    intro le mm hp hT _ _
+    exact EvalExpr.Etempvar _buf (tptr tuchar) _ (hT.get (by temps_get))
+  · -- buf = t'2 + 1
+    intro le mm hp hT _ _
     refine EvalExpr.Ebinop .Oadd _ _ _
-      (u (s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1)))))
-      (u (s.s1 + sumBytes (bytesOf f (nTot - m)))) _
-      (EvalExpr.Etempvar _sum2 tulong _ (hT.get (by temps_mem)))
-      (EvalExpr.Etempvar _adler tulong _ (hT.get (by temps_mem))) ?_
+      (.Vptr b (ofsAt ofs0 (nTot - (m + 1)))) (.Vint (Integers.Int.repr 1)) _
+      (EvalExpr.Etempvar _t'2 (tptr tuchar) _ (hT.get (by temps_get)))
+      (EvalExpr.Econst_int _ _) ?_
     simp only [typeof]
-    -- `sum2 += adler` where `adler` already holds the NEW value: regroup, then
-    -- the two `step_unreduced` equations close it
+    rw [semAdd_byte, byteOfs_ofsAt _ ofs0 (nTot - (m + 1)) hkfit1, hk1]
+  · -- t'39 = *t'2
+    intro le mm hp hT hH hag
+    exact eval_deref_byte (p := p) (ofs0 := ofs0) (n := nTot) (f := f)
+      (k := nTot - (m + 1)) (pid := _t'2) hB.readable hH hag hklt hB.bytes
+      (hT.get (by temps_get)) (ofsAt_unsigned ofs0 _ hkfit)
+  · -- adler += t'39
+    intro le mm hp hT _ _
+    have hnat : s.s1 + sumBytes (bytesOf f (nTot - (m + 1))) + f (nTot - (m + 1))
+              = s.s1 + sumBytes (bytesOf f (nTot - m)) := by rw [hsum]; omega
+    refine EvalExpr.Ebinop .Oadd _ _ _
+      (u (s.s1 + sumBytes (bytesOf f (nTot - (m + 1)))))
+      (bt (f (nTot - (m + 1)))) _
+      (EvalExpr.Etempvar _adler tulong _ (hT.get (by temps_get)))
+      (EvalExpr.Etempvar _t'39 tuchar _ (hT.get (by temps_get))) ?_
+    simp only [typeof]
+    rw [semBinop_add_ulong_uchar, u32_unsigned _ (by omega), u64_add, hnat]
+  · -- sum2 += adler
+    intro le mm hp hT _ _
     have hnat : s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1)))
                   + (s.s1 + sumBytes (bytesOf f (nTot - m)))
                 = s.s2 + weighted s.s1 (bytesOf f (nTot - m)) := by
       rw [hsum, hwt]; omega
+    refine EvalExpr.Ebinop .Oadd _ _ _
+      (u (s.s2 + weighted s.s1 (bytesOf f (nTot - (m + 1)))))
+      (u (s.s1 + sumBytes (bytesOf f (nTot - m)))) _
+      (EvalExpr.Etempvar _sum2 tulong _ (hT.get (by temps_get)))
+      (EvalExpr.Etempvar _adler tulong _ (hT.get (by temps_get))) ?_
+    simp only [typeof]
     rw [semBinop_add_ulong_ulong, u64_add, hnat]
+
 
 /-! ## Assembling the loop
 
@@ -652,8 +592,8 @@ The C proved here, from `adler32_z`'s `len < 16` branch:
 
     while (len--) { adler += *buf++; sum2 += adler; }
 
-Four lines.  Clean build of this file: **0.87 s**.  No `sorry`; axioms are the
-allowed five.  Code lines (comments and blanks excluded) are 477 here plus 100 in
+Four lines.  Clean build of this file: **1.25 s**.  No `sorry`; axioms are the
+allowed five.  Code lines (comments and blanks excluded) are 400 here plus 100 in
 `ZAdlerMath`, and they divide sharply by reusability:
 
 | category | lines | pays for |
@@ -661,40 +601,48 @@ allowed five.  Code lines (comments and blanks excluded) are 477 here plus 100 i
 | generic Clight machinery | 77 | the whole project |
 | adler32 mathematics (`ZAdlerMath`) | 100 | all of adler32, and the round trip needs the catenation law anyway |
 | AST transcription + `rfl` guard | 37 | this function, mechanical |
-| **the loop proof itself** | **356** | **this loop** |
+| **the loop proof itself** | **286** | **this loop** |
 
-**So the loop costs ~89 Lean lines per line of C** (356/4), or 98 counting the
-AST transcription.  The plan predicted **90–135** for loop-, struct- and
-goto-heavy code against the 45 measured on the *loop-free* `len == 1` path.  The
-measurement lands at the **optimistic end of the predicted band**, so the
-~350k–600k-line project estimate stands rather than needing revision upward.
+**So the loop costs ~71 Lean lines per line of C** (286/4), or 81 counting the AST
+transcription.  The plan predicted **90–135** for loop-, struct- and goto-heavy
+code against the 45 measured on the *loop-free* `len == 1` path.  The measurement
+comes in **below the predicted band** — 89 as first written, 71 after
+`localst_fwd` — so the ~350k–600k-line project estimate is if anything
+conservative.
 
-**Where the 356 lines actually go — and the one piece of infrastructure worth
-building before anything else:**
+**Where the lines go, and what `localst_fwd` changed.**  This file was first
+written against `triple_set_local`, which makes the caller supply each
+mid-condition list.  It was then rewritten against `localst_fwd`
+(`CCLib.Temps`), which computes them:
 
-| piece | lines |
-|---|---|
-| `work_step` (the three assignments) | **117** |
-| `acc_bounds` (no accumulator overflows) | 46 |
-| `test_break` (measure 0 breaks) | 41 |
-| `test_pass` (measure `m+1` falls through) | 41 |
-| `body_triple`/`incr_triple`/`loop_triple` (assembly) | 44 |
-| the invariant (`tracked`/`Inv`/`JAssn`/`Post`) | 22 |
-| `Bounds`, `entry_state`, `post_is_model` | 45 |
+| piece | before | after |
+|---|---|---|
+| `work_step` (the three assignments) | **117** | **57** |
+| `test_pass` (measure `m+1` falls through) | 41 | 33 |
+| `test_break` (measure 0 breaks) | 41 | 38 |
+| the two lists they used to need | 13 | 14 |
+| **total** | **212** | **142** |
 
-`work_step` is a third of the total, and almost none of it is mathematics — it is
-**tracked-temporary bookkeeping**.  `triple_seq_fwd` takes its mid-condition
-*explicitly*, so every one of the five chained assignments has its full
-post-state list written out, and each list repeats the four invariant entries.
-That is the Step-10 concern ("temp bookkeeping is the scaling risk") confirmed
-with a number.
+**A 33 % cut**, and the file went from 477 to 400 code lines.  `work_step` alone
+halved, because it was almost pure bookkeeping: five chained assignments, each
+with its full post-state list written out.  Now it is five `EvalExpr` obligations
+and nothing else.  So the loop figure improves from ~89 to **~71 Lean lines per
+line of C**, and the mechanism generalises to every assignment chain in the
+project.
 
-**The mitigation is concrete and it is the highest-leverage item in the plan.**  A
-forward-chaining tactic for `Sep.LocalSt` — one that computes the post-list from
-the pre-list and the statement instead of demanding it — would remove most of
-those 117 lines.  Call it a 30–35 % cut on loop-heavy proofs.  Against the plan's
-own ~350k–600k-line estimate that is **six figures of Lean**, and it is a few
-hundred lines of metaprogramming.  It should be built before M3, not after.
+**The tactic's one real limitation, stated precisely.**  `localst_fwd` removes the
+*lists*; it cannot always infer the *values*.  The rule is exactly:
+
+* if the chain's post is **determined by the goal**, the values come for free —
+  `work_step` states its post as `lWork` and needed no help at all;
+* if the chain **feeds a branch**, nothing determines them, and each assigned
+  value must be given positionally.  That is `test_break` (whose post is
+  discarded by the `break`) and `test_pass` (whose chain flows into an `if`).
+
+Pinning a value costs no extra lines — it replaces an `_` — so the limitation is
+mild.  It is also not fixable in general: a `break` genuinely discards the state,
+so there is nothing in the goal to unify against.  `CCLib.Tactics` documents the
+same constraint for its raw-`Assn` `forward_set`.
 
 **What this does not cover.**  `adler32_z`'s other two loops are harder in ways
 this one is not: the `NMAX` block loop is *nested* (an outer `while` over 5552-byte
