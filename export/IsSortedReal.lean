@@ -1,4 +1,9 @@
 /-
+  SUPERSEDED (Phase 7.7) by `IsSortedSep.lean`, which proves the same behaviour
+  with the *separation* logic — so the array is an owned resource and the frame
+  rule applies.  This file is kept because `IsSortedSep` reuses its AST
+  definitions and `body_eq`, and because the two proofs are worth comparing.
+
   **The Phase-6 milestone.**
 
   `is_sorted` (from `main.c`, exported by `clightgen -lean` into `GenMain`)
@@ -14,6 +19,7 @@
 import GenMain
 import CCLib
 open CC
+open Main   -- the generated module now lives in its own namespace
 
 namespace IsSortedReal
 
@@ -74,10 +80,10 @@ theorem body_eq : f_is_sorted.fn_body = fullBody := rfl
 
 /-! ## Identifier distinctness
 
-Taken as a hypothesis so every theorem below is axiom-free.  It is discharged
-once, for the generated program, in `idents_distinct` — by `native_decide`,
-because `identOfString` folds over a `String` and does not reduce in the kernel
-(`decide` gets stuck; `Positive.ofNat` literals like `_t'1` would be fine). -/
+Taken as a hypothesis so every theorem below is independent of the generated
+program.  Discharged once, in `idents_distinct`, by **kernel `decide`** — this
+needed `native_decide` until `identOfString` was made kernel-reducible (see
+`CCLib.Positive`). -/
 
 /-- The identifiers `is_sorted` writes, each distinct from the ones still live at
     that point.  Field `x_y` reads "writing `x` does not disturb `y`". -/
@@ -414,12 +420,13 @@ end
 
 /-! ## Discharging the identifier hypothesis
 
-`native_decide` is used only here, and only for "these seven identifiers are
-pairwise distinct".  It is needed because `identOfString` folds over a `String`,
-which the kernel does not reduce (`decide` gets stuck on it).  The values are
-checkable independently: `#eval (_numbers, _len, _i, _t'1, _t'2, _last, _first)`. -/
+One `decide`, for "these seven identifiers are pairwise distinct".  This used to
+require `native_decide` (and therefore an extra axiom in every downstream
+theorem); making `identOfString` fold over `String.toList` in `CCLib.Positive`
+put it back in the kernel's reach.  The values are checkable independently:
+`#eval (_numbers, _len, _i, _t'1, _t'2, _last, _first)`. -/
 theorem idents_distinct : Distinct := by
-  constructor <;> native_decide
+  constructor <;> decide
 
 /-- **Phase-6 milestone.**  `is_sorted`, as exported from `main.c` by
     `clightgen -lean`, returns `true` on every sorted array — under CompCert's
@@ -450,17 +457,17 @@ puts the two parameters into the temporaries the body reads. -/
 
 /-- The side conditions `function_entry2` imposes on `f_is_sorted` — no
     block-scoped variables, distinct parameter names, parameters disjoint from
-    temporaries.  Facts about the generated AST; `native_decide` again because of
+    temporaries.  Facts about the generated AST; `decide` again because of
     `identOfString`. -/
 theorem entry_wf :
     listNorepet (varNames f_is_sorted.fn_vars)
     ∧ listNorepet (varNames f_is_sorted.fn_params)
     ∧ listDisjoint (varNames f_is_sorted.fn_params) (varNames f_is_sorted.fn_temps) := by
-  refine ⟨?_, ?_, ?_⟩ <;> native_decide
+  refine ⟨?_, ?_, ?_⟩ <;> decide
 
 /-- `len` and `numbers` are different identifiers (not part of `Distinct`, which
     only lists the *writes*, but needed to read the parameters back out). -/
-theorem len_ne_num : _len ≠ _numbers := by native_decide
+theorem len_ne_num : _len ≠ _numbers := by decide
 
 /-- **`is_sorted` called on a sorted array returns `true`.**
 

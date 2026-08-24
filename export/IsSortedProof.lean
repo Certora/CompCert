@@ -12,6 +12,7 @@
 import GenMain
 import ClightSem
 open CC ClightSem
+open Main   -- the generated module now lives in its own namespace
 
 namespace IsSortedProof
 
@@ -58,20 +59,20 @@ def loopIncr : Stmt :=
 
 -- Ident distinctness facts we need for environment reasoning, in the
 -- `(a = b) = False` form so `simp` can discharge `set_ne` side conditions.
-@[simp] theorem num_t1 : (_numbers = _t'1) = False := by native_decide
-@[simp] theorem num_t2 : (_numbers = _t'2) = False := by native_decide
-@[simp] theorem num_i  : (_numbers = _i) = False := by native_decide
-@[simp] theorem num_len : (_numbers = _len) = False := by native_decide
-@[simp] theorem num_last : (_numbers = _last) = False := by native_decide
-@[simp] theorem num_first : (_numbers = _first) = False := by native_decide
-@[simp] theorem len_t1 : (_len = _t'1) = False := by native_decide
-@[simp] theorem len_t2 : (_len = _t'2) = False := by native_decide
-@[simp] theorem len_i  : (_len = _i) = False := by native_decide
-@[simp] theorem len_last : (_len = _last) = False := by native_decide
-@[simp] theorem len_first : (_len = _first) = False := by native_decide
-@[simp] theorem i_t1  : (_i = _t'1) = False := by native_decide
-@[simp] theorem i_t2  : (_i = _t'2) = False := by native_decide
-@[simp] theorem t1_t2 : (_t'1 = _t'2) = False := by native_decide
+@[simp] theorem num_t1 : (_numbers = _t'1) = False := by decide
+@[simp] theorem num_t2 : (_numbers = _t'2) = False := by decide
+@[simp] theorem num_i  : (_numbers = _i) = False := by decide
+@[simp] theorem num_len : (_numbers = _len) = False := by decide
+@[simp] theorem num_last : (_numbers = _last) = False := by decide
+@[simp] theorem num_first : (_numbers = _first) = False := by decide
+@[simp] theorem len_t1 : (_len = _t'1) = False := by decide
+@[simp] theorem len_t2 : (_len = _t'2) = False := by decide
+@[simp] theorem len_i  : (_len = _i) = False := by decide
+@[simp] theorem len_last : (_len = _last) = False := by decide
+@[simp] theorem len_first : (_len = _first) = False := by decide
+@[simp] theorem i_t1  : (_i = _t'1) = False := by decide
+@[simp] theorem i_t2  : (_i = _t'2) = False := by decide
+@[simp] theorem t1_t2 : (_t'1 = _t'2) = False := by decide
 
 /-- One "good" loop iteration (index `i` in range, order holds at `i`):
     the body runs to `norm`, setting the two scratch temporaries. -/

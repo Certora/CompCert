@@ -66,6 +66,11 @@ for c in "$corpus"/*.c; do
   # --- subject: clightgen -lean, then the Lean interpreter ---
   "$root/clightgen" -lean -normalize $CCFLAGS -o "$tmp/DiffProg.lean" "$c"
   cp "$tmp/DiffProg.lean" "$work/DiffProg.lean"
+  # Generated modules live in a per-source namespace (so that several of them can
+  # be imported together — see CCLib/Linking.lean).  Read it out of the file
+  # rather than recomputing the exporter's naming rule here.
+  ns=$(sed -n 's/^namespace \(.*\)$/\1/p' "$work/DiffProg.lean" | head -1)
+  sed "s/^open CC$/open CC\nopen $ns/" "$exp/DiffRun.lean" > "$work/DiffRun.lean"
   # `import` needs a compiled module, so build DiffProg.olean first.  Both files
   # sit at the root of $work, so `import DiffProg` resolves there.
   if ! ( cd "$work" \

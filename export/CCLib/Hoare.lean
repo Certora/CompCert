@@ -108,7 +108,15 @@ def ExitConds.holds (R : ExitConds) : Outcome → Prop
 def ExitConds.only (Q : Assn) : ExitConds :=
   { normal := Q, brk := Assn.no, cont := Assn.no, ret := fun _ _ => False }
 
-/-! ## The triple -/
+/-! ## The triple
+
+SUPERSEDED (Phase 7.4) by `CCLib/SepHoare.lean`, which carries a heap frame and
+so admits a frame rule and a call rule.  Everything from here down is kept
+because `IsSortedReal.lean` still uses it and because the two are worth
+comparing; new proofs should use `CC.Sep`.
+
+Note the *infrastructure* above — `Steps`, `SStep`, `EntryRel`, `Outcome`,
+`Outcome.state`, `Steps.toStar` — is NOT superseded: `SepHoare` shares it. -/
 
 /-- `Triple ge fe f P s R`: from any state satisfying `P` — under *any* continuation
     — executing `s` silently reaches an outcome satisfying `R`.

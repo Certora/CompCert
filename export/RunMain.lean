@@ -3,6 +3,7 @@
 import GenMain
 import CCLib
 open CC
+open Main   -- the generated module now lives in its own namespace
 
 -- main() { return 0; }  -- should terminate with exit code 0
 #eval match runProgram prog 10000 with

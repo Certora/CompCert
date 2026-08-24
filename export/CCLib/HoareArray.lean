@@ -138,6 +138,61 @@ theorem semCast_one_bool (m) :
     Cop.semCast (.Vint (Integers.Int.repr 1)) tint tbool m
       = some (.Vint (Integers.Int.repr 1)) := by simp; decide
 
+/-! ## From `elemOfs` to plain `Z`
+
+`Cop.sem_add` computes an element address in `Ptrofs` (i.e. modulo 2^64), while
+the separating `arrayU32` predicate indexes by `ofs + 4*i` over `Z`.  Bridging the
+two needs a no-overflow side condition — the same one CompCert's own array
+reasoning carries. -/
+
+-- fresh Nat/Int binders so `omega` sees its own instances (the goal's `+`/`=`
+-- sit at `CC.Z`, where omega is blind)
+private theorem ptr_arith (A i : Nat)
+    (hno : (A : _root_.Int) + 4 * (i : _root_.Int) < 18446744073709551616) :
+    (((A + 4 * i % 18446744073709551616) % 18446744073709551616 : Nat) : _root_.Int)
+      = (A : _root_.Int) + 4 * (i : _root_.Int) := by omega
+
+theorem elemOfs_unsigned (cenv : CompositeEnv) (ofs0 : Integers.Ptrofs) (i : Nat)
+    (hi : (i : _root_.Int) < 2147483648)
+    (hno : (Integers.Ptrofs.unsigned ofs0) + 4 * (i : _root_.Int) < 18446744073709551616) :
+    Integers.Ptrofs.unsigned (elemOfs cenv ofs0 (Integers.Int.repr i))
+      = Integers.Ptrofs.unsigned ofs0 + 4 * (i : _root_.Int) := by
+  have hsz : sizeof cenv tuint = 4 := by simp [sizeof, tuint]
+  have hw : (2 : Nat) ^ Archi.ptrWordsize = 18446744073709551616 := by
+    rw [Archi.ptrWordsize_eq]
+  simp only [elemOfs, hsz, Cop.ptrofsOfInt, Integers.Ptrofs.of_ints,
+             Integers.Ptrofs.add, Integers.Ptrofs.mul, Integers.Ptrofs.unsigned,
+             Integers.Ptrofs.repr, Integers.MI.add, Integers.MI.mul,
+             Integers.MI.repr, Integers.MI.unsigned, Integers.MI.signed,
+             BitVec.toNat_add, BitVec.toNat_mul, BitVec.toNat_ofInt, hw] at hno ⊢
+  rw [toInt_repr (i : _root_.Int) (by omega) hi]
+  have h4 : ((4 : _root_.Int) % ((18446744073709551616 : Nat) : _root_.Int)).toNat = 4 := by
+    omega
+  have hii : (((i : Nat) : _root_.Int) % ((18446744073709551616 : Nat) : _root_.Int)).toNat = i := by
+    omega
+  rw [h4, hii]
+  exact ptr_arith _ _ hno
+
+private theorem padd_arith (A d : Nat) (hno : A + d < 18446744073709551616) :
+    (((A + d) % 18446744073709551616 : Nat) : _root_.Int)
+      = (A : _root_.Int) + (d : _root_.Int) := by omega
+/-- Address of a struct field, over `Z`, given that the object does not straddle
+    the end of the address space.  The bound is stated over `Nat` so that `omega`
+    can see it: `Ptrofs.unsigned` returns `Z`, where it cannot. -/
+theorem ptrofs_add_unsigned (ofs : Integers.Ptrofs) (d : Nat)
+    (hno : ofs.toNat + d < 18446744073709551616) :
+    Integers.Ptrofs.unsigned (Integers.Ptrofs.add ofs (Integers.Ptrofs.repr (d : _root_.Int)))
+      = Integers.Ptrofs.unsigned ofs + (d : _root_.Int) := by
+  have hw : (2 : Nat) ^ Archi.ptrWordsize = 18446744073709551616 := by
+    rw [Archi.ptrWordsize_eq]
+  simp only [Integers.Ptrofs.add, Integers.Ptrofs.unsigned, Integers.Ptrofs.repr,
+             Integers.MI.add, Integers.MI.repr, Integers.MI.unsigned,
+             BitVec.toNat_add, BitVec.toNat_ofInt, hw]
+  have hd : (((d : Nat) : _root_.Int) % ((18446744073709551616 : Nat) : _root_.Int)).toNat = d := by
+    omega
+  rw [hd]
+  exact padd_arith _ _ hno
+
 /-- `freeList` over the environment of a function with no `fn_vars` is a no-op. -/
 theorem elements_empty {A : Type} : PTree.elements (PTree.empty : PTree A) = [] := rfl
 

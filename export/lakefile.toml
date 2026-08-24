@@ -10,6 +10,12 @@ name = "compcert-clight-lean"
 #   GenMain       : the generated AST of main.c (contains f_is_sorted)
 #   ClightSem     : a small big-step model for a Clight fragment.  TOY — not
 #                   CompCert's semantics; slated for replacement (Phases 3-4).
+#   MemCheck      : non-vacuity checks for the Phase-7.1 memory lemma library
+#                   (all by `decide`, so axiom-free)
+#   SepCheck      : usability checks for the Phase-7.5 closure theorem
+#                   (self-recursion and mutual recursion both close), plus the
+#                   Phase-9 Step-5 memcpy spec (satisfiable, and reachable at
+#                   al = 1)
 #   SemCheck      : sanity checks for the Phase-3 semantics (init_mem runs on a
 #                   generated program; the Step relation is inhabited)
 #   RunMain       : executes the program generated from main.c (Phase-4 interpreter)
@@ -18,11 +24,49 @@ name = "compcert-clight-lean"
 #                   SUPERSEDED by IsSortedReal (kept for comparison).
 #   IsSortedReal  : the Phase-6 milestone — the SAME theorem against the real
 #                   Clight semantics, via the Hoare logic in CCLib.Hoare.
+#   GenStruct     : generated AST of test/lean/structs2.c (struct field access)
+#   StructSep     : a struct field read, via structAt / fieldsAt_split
+#   GenSwap       : generated AST of test/lean/swap.c (the smallest WRITING program)
+#   SwapSep       : swap proved with the separation logic — exercises
+#                   triple_assign / mapsto_store, and the frame rule
+#   IsSortedSep   : the Phase-7.7 milestone — the SAME theorem again, now with the
+#                   SEPARATION logic: is_sorted meets a FunSpec, so it is callable
+#                   via Sep.triple_call and the frame rule applies.
 #   IsSortedRealCheck : discharges IsSortedReal's hypotheses for a concrete
 #                   3-element array, so the milestone is provably non-vacuous.
+#   GenAdler32    : generated AST of zlib-1.3.2's adler32.c
+#   ZAdler32      : Phase-9 Step 0 (calibration) — a Lean model of Adler-32 and
+#                   the `len == 1` fast path of adler32_z proved against it
+#   ZAdler32Check : non-vacuity for that spec, plus validation of the model
+#                   against the published adler32("Wikipedia") value.  The model
+#                   is also checked against zlib's own adler32 by
+#                   test/lean/adler_diff.sh (200 random buffers).
+#   TempsCheck    : Phase-9 Step 10 — the tracked-temporary state layer
+#                   (CCLib.Temps) is O(1) per statement, checked at 20 temps
+#   GenFuncPtr    : generated AST of test/lean/funcptr.c
+#   GenDeflate    : generated AST of zlib-1.3.2's deflate.c (21,427 lines; 3.3 s)
+#   DeflateMeasure: Phase-9 Wave-A measurement — the REAL 52-field deflate_state
+#                   predicate, timed.  Its conclusions (extraction is free, field
+#                   offsets must be batched) set Wave B's design.
+#   GenTreeSep    : generated AST of test/lean/treesep.c — compiled against
+#                   zlib's REAL deflate.h, so the layout is deflate_state's own
+#   TreeSep       : Phase-9 Wave-B item 6 — s->dyn_ltree[k].Freq READ and
+#                   WRITTEN end to end.  The write was impossible before Wave B
+#                   (no array split/join existed).
+#   GenZ*         : the remaining seven zlib round-trip modules (compress,
+#                   uncompr, inflate, trees, inftrees, inffast, zutil), each in
+#                   its own namespace so they can be imported together
+#   ZLink         : Phase-9 Step 1 (Wave C) — all nine zlib translation units
+#                   linked into ONE Program via CCLib.Linking, with the
+#                   cross-module calls shown to resolve to Internal bodies
+#   FuncPtrSep    : Phase-9 Step 7 — calls through function pointers, in all
+#                   three shapes clightgen emits (direct, via a temporary, and
+#                   `(*p)(…)` through a struct field, which is zlib's ZALLOC).
+#                   `apply_satisfies` is higher-order: correct for ANY callee
+#                   meeting a spec.
 #
 # Build with:  lake build
-defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedRealCheck", "SemCheck", "RunMain", "RunIsSorted"]
+defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedSep", "GenSwap", "SwapSep", "GenStruct", "StructSep", "IsSortedRealCheck", "MemCheck", "SepCheck", "SemCheck", "RunMain", "RunIsSorted", "GenAdler32", "ZAdler32", "ZAdler32Check", "TempsCheck", "GenFuncPtr", "FuncPtrSep", "GenDeflate", "DeflateMeasure", "GenTreeSep", "TreeSep", "GenZCompress", "GenZUncompr", "GenZInflate", "GenZTrees", "GenZInftrees", "GenZInffast", "GenZZutil", "ZLink"]
 
 [[lean_lib]]
 name = "CCLib"
@@ -46,7 +90,28 @@ name = "IsSortedProof"
 name = "IsSortedReal"
 
 [[lean_lib]]
+name = "GenStruct"
+
+[[lean_lib]]
+name = "StructSep"
+
+[[lean_lib]]
+name = "GenSwap"
+
+[[lean_lib]]
+name = "SwapSep"
+
+[[lean_lib]]
+name = "IsSortedSep"
+
+[[lean_lib]]
 name = "IsSortedRealCheck"
+
+[[lean_lib]]
+name = "MemCheck"
+
+[[lean_lib]]
+name = "SepCheck"
 
 [[lean_lib]]
 name = "SemCheck"
@@ -56,3 +121,57 @@ name = "RunMain"
 
 [[lean_lib]]
 name = "RunIsSorted"
+
+[[lean_lib]]
+name = "GenAdler32"
+
+[[lean_lib]]
+name = "ZAdler32"
+
+[[lean_lib]]
+name = "ZAdler32Check"
+
+[[lean_lib]]
+name = "TempsCheck"
+
+[[lean_lib]]
+name = "GenFuncPtr"
+
+[[lean_lib]]
+name = "FuncPtrSep"
+
+[[lean_lib]]
+name = "GenDeflate"
+
+[[lean_lib]]
+name = "DeflateMeasure"
+
+[[lean_lib]]
+name = "GenTreeSep"
+
+[[lean_lib]]
+name = "TreeSep"
+
+[[lean_lib]]
+name = "GenZCompress"
+
+[[lean_lib]]
+name = "GenZUncompr"
+
+[[lean_lib]]
+name = "GenZInflate"
+
+[[lean_lib]]
+name = "GenZTrees"
+
+[[lean_lib]]
+name = "GenZInftrees"
+
+[[lean_lib]]
+name = "GenZInffast"
+
+[[lean_lib]]
+name = "GenZZutil"
+
+[[lean_lib]]
+name = "ZLink"

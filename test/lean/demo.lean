@@ -1,6 +1,8 @@
 import Clightdefs
 open CC
 
+namespace Demo
+
 namespace Info
   def version : String := "3.17"
   def build_number : String := ""
@@ -469,4 +471,5 @@ def public_idents : List Ident :=
 def prog : Program :=
   mkprogram composites global_definitions public_idents _main
 
+end Demo
 

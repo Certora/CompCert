@@ -103,8 +103,23 @@ private def appendCharPos (c : Char) (p : Positive) : Positive :=
   let p := appendBit (nthBit n 0) p
   .xI (.xI (.xI (.xI (.xI (.xI p)))))
 
-/-- Encode a character string as an identifier (`ident_of_string`). -/
+/-- Encode a character string as an identifier (`ident_of_string`).
+
+    Folds over `s.toList` rather than calling `String.foldr` directly.  The two
+    are equal — `identOfString_eq_foldr` below, from core's
+    `String.foldr_eq_foldr_toList` — but only this form **reduces in the
+    kernel**: `String.foldr` goes through the opaque UTF-8 iterator, so `decide`
+    got stuck on every identifier disequality and the program logic had to reach
+    for `native_decide`.  Folding over the character list makes identifier facts
+    kernel-decidable, which is why `Distinct`-style hypotheses are no longer
+    needed. -/
 def identOfString (s : String) : Ident :=
-  s.foldr appendCharPos Positive.xH
+  s.toList.foldr appendCharPos Positive.xH
+
+/-- The `toList` fold above is exactly `String.foldr`, so nothing about the
+    encoding changed — only its reducibility. -/
+theorem identOfString_eq_foldr (s : String) :
+    identOfString s = s.foldr appendCharPos Positive.xH :=
+  (String.foldr_eq_foldr_toList ..).symm
 
 end CC

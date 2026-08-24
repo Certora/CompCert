@@ -34,7 +34,7 @@ CompCert's `errmsg` is a list of message items carrying idents; we use a plain
 inductive Res (A : Type) where
   | OK (a : A)
   | Error (msg : String)
-  deriving Inhabited
+  deriving DecidableEq, Inhabited
 
 namespace Res
 def isOK {A : Type} : Res A → Bool
@@ -263,6 +263,9 @@ inductive Member where
   | Member_plain (id : Ident) (t : Ty)
   | Member_bitfield (id : Ident) (sz : IntSize) (sg : Signedness) (a : Attr)
                     (width : Z) (padding : Bool)
+  -- `DecidableEq` (not derivable for `Ty` itself, but usable here) is needed to
+  -- state concrete `composite_env` facts; see `StructSep.lean`.
+  deriving DecidableEq
 
 instance : Inhabited Member := ⟨Member.Member_plain Positive.xH Ty.Tvoid⟩
 
@@ -302,6 +305,7 @@ structure Composite where
   co_sizeof : Z
   co_alignof : Z
   co_rank : Nat
+  deriving DecidableEq
 
 instance : Inhabited Composite :=
   ⟨{ co_su := SU.Struct, co_members := [], co_attr := noattr,

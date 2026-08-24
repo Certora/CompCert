@@ -1,7 +1,7 @@
 import Clightdefs
 open CC
 
-namespace Main
+namespace Treesep
 
 namespace Info
   def version : String := "3.17"
@@ -13,10 +13,12 @@ namespace Info
   def abi : String := "apple"
   def bitsize : Nat := 64
   def big_endian : Bool := false
-  def source_file : String := "main.c"
+  def source_file : String := "treesep.c"
   def normalized : Bool := true
 end Info
 
+def __1354 : Ident := identOfString "_1354"
+def __1355 : Ident := identOfString "_1355"
 def ___builtin_annot : Ident := identOfString "__builtin_annot"
 def ___builtin_annot_intval : Ident := identOfString "__builtin_annot_intval"
 def ___builtin_bswap : Ident := identOfString "__builtin_bswap"
@@ -71,86 +73,274 @@ def ___compcert_va_composite : Ident := identOfString "__compcert_va_composite"
 def ___compcert_va_float64 : Ident := identOfString "__compcert_va_float64"
 def ___compcert_va_int32 : Ident := identOfString "__compcert_va_int32"
 def ___compcert_va_int64 : Ident := identOfString "__compcert_va_int64"
-def _first : Ident := identOfString "first"
-def _i : Ident := identOfString "i"
-def _is_sorted : Ident := identOfString "is_sorted"
-def _last : Ident := identOfString "last"
+def _adler : Ident := identOfString "adler"
+def _avail_in : Ident := identOfString "avail_in"
+def _avail_out : Ident := identOfString "avail_out"
+def _bi_buf : Ident := identOfString "bi_buf"
+def _bi_used : Ident := identOfString "bi_used"
+def _bi_valid : Ident := identOfString "bi_valid"
+def _bl_count : Ident := identOfString "bl_count"
+def _bl_desc : Ident := identOfString "bl_desc"
+def _bl_tree : Ident := identOfString "bl_tree"
+def _block_start : Ident := identOfString "block_start"
+def _code : Ident := identOfString "code"
+def _comm_max : Ident := identOfString "comm_max"
+def _comment : Ident := identOfString "comment"
+def _ct_data_s : Ident := identOfString "ct_data_s"
+def _d_desc : Ident := identOfString "d_desc"
+def _dad : Ident := identOfString "dad"
+def _data_type : Ident := identOfString "data_type"
+def _depth : Ident := identOfString "depth"
+def _dl : Ident := identOfString "dl"
+def _done : Ident := identOfString "done"
+def _dyn_dtree : Ident := identOfString "dyn_dtree"
+def _dyn_ltree : Ident := identOfString "dyn_ltree"
+def _dyn_tree : Ident := identOfString "dyn_tree"
+def _extra : Ident := identOfString "extra"
+def _extra_len : Ident := identOfString "extra_len"
+def _extra_max : Ident := identOfString "extra_max"
+def _fc : Ident := identOfString "fc"
+def _freq : Ident := identOfString "freq"
+def _get_freq : Ident := identOfString "get_freq"
+def _good_match : Ident := identOfString "good_match"
+def _gz_header_s : Ident := identOfString "gz_header_s"
+def _gzhead : Ident := identOfString "gzhead"
+def _gzindex : Ident := identOfString "gzindex"
+def _hash_bits : Ident := identOfString "hash_bits"
+def _hash_mask : Ident := identOfString "hash_mask"
+def _hash_shift : Ident := identOfString "hash_shift"
+def _hash_size : Ident := identOfString "hash_size"
+def _hcrc : Ident := identOfString "hcrc"
+def _head : Ident := identOfString "head"
+def _heap : Ident := identOfString "heap"
+def _heap_len : Ident := identOfString "heap_len"
+def _heap_max : Ident := identOfString "heap_max"
+def _high_water : Ident := identOfString "high_water"
+def _ins_h : Ident := identOfString "ins_h"
+def _insert : Ident := identOfString "insert"
+def _internal_state : Ident := identOfString "internal_state"
+def _k : Ident := identOfString "k"
+def _l_desc : Ident := identOfString "l_desc"
+def _last_flush : Ident := identOfString "last_flush"
 def _len : Ident := identOfString "len"
+def _level : Ident := identOfString "level"
+def _lit_bufsize : Ident := identOfString "lit_bufsize"
+def _lookahead : Ident := identOfString "lookahead"
 def _main : Ident := identOfString "main"
-def _numbers : Ident := identOfString "numbers"
+def _match_available : Ident := identOfString "match_available"
+def _match_length : Ident := identOfString "match_length"
+def _match_start : Ident := identOfString "match_start"
+def _matches : Ident := identOfString "matches"
+def _max_chain_length : Ident := identOfString "max_chain_length"
+def _max_code : Ident := identOfString "max_code"
+def _max_lazy_match : Ident := identOfString "max_lazy_match"
+def _method : Ident := identOfString "method"
+def _msg : Ident := identOfString "msg"
+def _name : Ident := identOfString "name"
+def _name_max : Ident := identOfString "name_max"
+def _next_in : Ident := identOfString "next_in"
+def _next_out : Ident := identOfString "next_out"
+def _nice_match : Ident := identOfString "nice_match"
+def _opaque : Ident := identOfString "opaque"
+def _opt_len : Ident := identOfString "opt_len"
+def _os : Ident := identOfString "os"
+def _pending : Ident := identOfString "pending"
+def _pending_buf : Ident := identOfString "pending_buf"
+def _pending_buf_size : Ident := identOfString "pending_buf_size"
+def _pending_out : Ident := identOfString "pending_out"
+def _prev : Ident := identOfString "prev"
+def _prev_length : Ident := identOfString "prev_length"
+def _prev_match : Ident := identOfString "prev_match"
+def _reserved : Ident := identOfString "reserved"
+def _s : Ident := identOfString "s"
+def _set_freq : Ident := identOfString "set_freq"
+def _slid : Ident := identOfString "slid"
+def _stat_desc : Ident := identOfString "stat_desc"
+def _state : Ident := identOfString "state"
+def _static_len : Ident := identOfString "static_len"
+def _static_tree_desc_s : Ident := identOfString "static_tree_desc_s"
+def _status : Ident := identOfString "status"
+def _strategy : Ident := identOfString "strategy"
+def _strm : Ident := identOfString "strm"
+def _strstart : Ident := identOfString "strstart"
+def _sym_buf : Ident := identOfString "sym_buf"
+def _sym_end : Ident := identOfString "sym_end"
+def _sym_next : Ident := identOfString "sym_next"
+def _text : Ident := identOfString "text"
+def _time : Ident := identOfString "time"
+def _total_in : Ident := identOfString "total_in"
+def _total_out : Ident := identOfString "total_out"
+def _tree_desc_s : Ident := identOfString "tree_desc_s"
+def _v : Ident := identOfString "v"
+def _w_bits : Ident := identOfString "w_bits"
+def _w_mask : Ident := identOfString "w_mask"
+def _w_size : Ident := identOfString "w_size"
+def _window : Ident := identOfString "window"
+def _window_size : Ident := identOfString "window_size"
+def _wrap : Ident := identOfString "wrap"
+def _xflags : Ident := identOfString "xflags"
+def _z_stream_s : Ident := identOfString "z_stream_s"
+def _zalloc : Ident := identOfString "zalloc"
+def _zfree : Ident := identOfString "zfree"
 def _t'1 : Ident := (Positive.ofNat 128)
-def _t'2 : Ident := (Positive.ofNat 129)
 
-def f_is_sorted : Function := {
-  fn_return := tbool,
+def f_get_freq : Function := {
+  fn_return := tushort,
   fn_callconv := cc_default,
-  fn_params := [(_numbers, (tptr tuint)), (_len, tint)],
+  fn_params := [(_s, (tptr (Ty.Tstruct _internal_state noattr))), (_k, tint)],
   fn_vars := [],
-  fn_temps := [(_last, tuint), (_first, tbool), (_i, tint), (_t'2, tuint),
-               (_t'1, tuint)],
+  fn_temps := [(_t'1, tushort)],
   fn_body :=
 (Stmt.Ssequence
-  (Stmt.Sifthenelse (Expr.Ebinop Binop.Ole (Expr.Etempvar _len tint)
-                      (Expr.Econst_int (Integers.Int.repr 1) tint) tint)
-    (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 1) tint)))
-    Stmt.Sskip)
-  (Stmt.Ssequence
-    (Stmt.Sset _last
-      (Expr.Ederef
-        (Expr.Ebinop Binop.Oadd (Expr.Etempvar _numbers (tptr tuint))
-          (Expr.Econst_int (Integers.Int.repr 0) tint) (tptr tuint)) tuint))
-    (Stmt.Ssequence
-      (Stmt.Sset _first
-        (Expr.Ecast (Expr.Econst_int (Integers.Int.repr 1) tint) tbool))
-      (Stmt.Ssequence
-        (Stmt.Ssequence
-          (Stmt.Sset _i (Expr.Econst_int (Integers.Int.repr 1) tint))
-          (Stmt.Sloop
-            (Stmt.Ssequence
-              (Stmt.Sifthenelse (Expr.Ebinop Binop.Olt
-                                  (Expr.Etempvar _i tint)
-                                  (Expr.Etempvar _len tint) tint)
-                Stmt.Sskip
-                Stmt.Sbreak)
-              (Stmt.Ssequence
-                (Stmt.Sset _t'1
-                  (Expr.Ederef
-                    (Expr.Ebinop Binop.Oadd
-                      (Expr.Etempvar _numbers (tptr tuint))
-                      (Expr.Etempvar _i tint) (tptr tuint)) tuint))
-                (Stmt.Ssequence
-                  (Stmt.Sset _t'2
-                    (Expr.Ederef
-                      (Expr.Ebinop Binop.Oadd
-                        (Expr.Etempvar _numbers (tptr tuint))
-                        (Expr.Ebinop Binop.Osub (Expr.Etempvar _i tint)
-                          (Expr.Econst_int (Integers.Int.repr 1) tint) tint)
-                        (tptr tuint)) tuint))
-                  (Stmt.Sifthenelse (Expr.Ebinop Binop.Olt
-                                      (Expr.Etempvar _t'1 tuint)
-                                      (Expr.Etempvar _t'2 tuint) tint)
-                    (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 0) tint)))
-                    Stmt.Sskip))))
-            (Stmt.Sset _i
-              (Expr.Ebinop Binop.Oadd (Expr.Etempvar _i tint)
-                (Expr.Econst_int (Integers.Int.repr 1) tint) tint))))
-        (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 1) tint)))))))
+  (Stmt.Sset _t'1
+    (Expr.Efield
+      (Expr.Efield
+        (Expr.Ederef
+          (Expr.Ebinop Binop.Oadd
+            (Expr.Efield
+              (Expr.Ederef
+                (Expr.Etempvar _s (tptr (Ty.Tstruct _internal_state noattr)))
+                (Ty.Tstruct _internal_state noattr)) _dyn_ltree
+              (tarray (Ty.Tstruct _ct_data_s noattr) 573))
+            (Expr.Etempvar _k tint) (tptr (Ty.Tstruct _ct_data_s noattr)))
+          (Ty.Tstruct _ct_data_s noattr)) _fc (Ty.Tunion __1354 noattr))
+      _freq tushort))
+  (Stmt.Sreturn (some (Expr.Etempvar _t'1 tushort))))
 }
 
-def f_main : Function := {
-  fn_return := tint,
+def f_set_freq : Function := {
+  fn_return := tvoid,
   fn_callconv := cc_default,
-  fn_params := [],
+  fn_params := [(_s, (tptr (Ty.Tstruct _internal_state noattr))), (_k, tint),
+                (_v, tushort)],
   fn_vars := [],
   fn_temps := [],
   fn_body :=
-(Stmt.Ssequence
-  (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 0) tint)))
-  (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 0) tint))))
+(Stmt.Sassign
+  (Expr.Efield
+    (Expr.Efield
+      (Expr.Ederef
+        (Expr.Ebinop Binop.Oadd
+          (Expr.Efield
+            (Expr.Ederef
+              (Expr.Etempvar _s (tptr (Ty.Tstruct _internal_state noattr)))
+              (Ty.Tstruct _internal_state noattr)) _dyn_ltree
+            (tarray (Ty.Tstruct _ct_data_s noattr) 573))
+          (Expr.Etempvar _k tint) (tptr (Ty.Tstruct _ct_data_s noattr)))
+        (Ty.Tstruct _ct_data_s noattr)) _fc (Ty.Tunion __1354 noattr)) _freq
+    tushort) (Expr.Etempvar _v tushort))
 }
 
 def composites : List CompositeDef :=
-[]
+[(CompositeDef.Composite _z_stream_s SU.Struct
+   [(Member.Member_plain _next_in (tptr tuchar)),
+    (Member.Member_plain _avail_in tuint),
+    (Member.Member_plain _total_in tulong),
+    (Member.Member_plain _next_out (tptr tuchar)),
+    (Member.Member_plain _avail_out tuint),
+    (Member.Member_plain _total_out tulong),
+    (Member.Member_plain _msg (tptr tschar)),
+    (Member.Member_plain _state (tptr (Ty.Tstruct _internal_state noattr))),
+    (Member.Member_plain _zalloc
+      (tptr (Ty.Tfunction [(tptr tvoid), tuint, tuint] (tptr tvoid)
+              cc_default))),
+    (Member.Member_plain _zfree
+      (tptr (Ty.Tfunction [(tptr tvoid), (tptr tvoid)] tvoid cc_default))),
+    (Member.Member_plain _opaque (tptr tvoid)),
+    (Member.Member_plain _data_type tint),
+    (Member.Member_plain _adler tulong),
+    (Member.Member_plain _reserved tulong)]
+   noattr),
+ (CompositeDef.Composite _gz_header_s SU.Struct
+   [(Member.Member_plain _text tint), (Member.Member_plain _time tulong),
+    (Member.Member_plain _xflags tint), (Member.Member_plain _os tint),
+    (Member.Member_plain _extra (tptr tuchar)),
+    (Member.Member_plain _extra_len tuint),
+    (Member.Member_plain _extra_max tuint),
+    (Member.Member_plain _name (tptr tuchar)),
+    (Member.Member_plain _name_max tuint),
+    (Member.Member_plain _comment (tptr tuchar)),
+    (Member.Member_plain _comm_max tuint), (Member.Member_plain _hcrc tint),
+    (Member.Member_plain _done tint)]
+   noattr),
+ (CompositeDef.Composite __1354 SU.Union
+   [(Member.Member_plain _freq tushort), (Member.Member_plain _code tushort)]
+   noattr),
+ (CompositeDef.Composite __1355 SU.Union
+   [(Member.Member_plain _dad tushort), (Member.Member_plain _len tushort)]
+   noattr),
+ (CompositeDef.Composite _ct_data_s SU.Struct
+   [(Member.Member_plain _fc (Ty.Tunion __1354 noattr)),
+    (Member.Member_plain _dl (Ty.Tunion __1355 noattr))]
+   noattr),
+ (CompositeDef.Composite _tree_desc_s SU.Struct
+   [(Member.Member_plain _dyn_tree (tptr (Ty.Tstruct _ct_data_s noattr))),
+    (Member.Member_plain _max_code tint),
+    (Member.Member_plain _stat_desc
+      (tptr (Ty.Tstruct _static_tree_desc_s noattr)))]
+   noattr),
+ (CompositeDef.Composite _internal_state SU.Struct
+   [(Member.Member_plain _strm (tptr (Ty.Tstruct _z_stream_s noattr))),
+    (Member.Member_plain _status tint),
+    (Member.Member_plain _pending_buf (tptr tuchar)),
+    (Member.Member_plain _pending_buf_size tulong),
+    (Member.Member_plain _pending_out (tptr tuchar)),
+    (Member.Member_plain _pending tulong), (Member.Member_plain _wrap tint),
+    (Member.Member_plain _gzhead (tptr (Ty.Tstruct _gz_header_s noattr))),
+    (Member.Member_plain _gzindex tulong),
+    (Member.Member_plain _method tuchar),
+    (Member.Member_plain _last_flush tint),
+    (Member.Member_plain _w_size tuint), (Member.Member_plain _w_bits tuint),
+    (Member.Member_plain _w_mask tuint),
+    (Member.Member_plain _window (tptr tuchar)),
+    (Member.Member_plain _window_size tulong),
+    (Member.Member_plain _prev (tptr tushort)),
+    (Member.Member_plain _head (tptr tushort)),
+    (Member.Member_plain _ins_h tuint),
+    (Member.Member_plain _hash_size tuint),
+    (Member.Member_plain _hash_bits tuint),
+    (Member.Member_plain _hash_mask tuint),
+    (Member.Member_plain _hash_shift tuint),
+    (Member.Member_plain _block_start tlong),
+    (Member.Member_plain _match_length tuint),
+    (Member.Member_plain _prev_match tuint),
+    (Member.Member_plain _match_available tint),
+    (Member.Member_plain _strstart tuint),
+    (Member.Member_plain _match_start tuint),
+    (Member.Member_plain _lookahead tuint),
+    (Member.Member_plain _prev_length tuint),
+    (Member.Member_plain _max_chain_length tuint),
+    (Member.Member_plain _max_lazy_match tuint),
+    (Member.Member_plain _level tint), (Member.Member_plain _strategy tint),
+    (Member.Member_plain _good_match tuint),
+    (Member.Member_plain _nice_match tint),
+    (Member.Member_plain _dyn_ltree
+      (tarray (Ty.Tstruct _ct_data_s noattr) 573)),
+    (Member.Member_plain _dyn_dtree
+      (tarray (Ty.Tstruct _ct_data_s noattr) 61)),
+    (Member.Member_plain _bl_tree (tarray (Ty.Tstruct _ct_data_s noattr) 39)),
+    (Member.Member_plain _l_desc (Ty.Tstruct _tree_desc_s noattr)),
+    (Member.Member_plain _d_desc (Ty.Tstruct _tree_desc_s noattr)),
+    (Member.Member_plain _bl_desc (Ty.Tstruct _tree_desc_s noattr)),
+    (Member.Member_plain _bl_count (tarray tushort 16)),
+    (Member.Member_plain _heap (tarray tint 573)),
+    (Member.Member_plain _heap_len tint),
+    (Member.Member_plain _heap_max tint),
+    (Member.Member_plain _depth (tarray tuchar 573)),
+    (Member.Member_plain _sym_buf (tptr tuchar)),
+    (Member.Member_plain _lit_bufsize tuint),
+    (Member.Member_plain _sym_next tuint),
+    (Member.Member_plain _sym_end tuint),
+    (Member.Member_plain _opt_len tulong),
+    (Member.Member_plain _static_len tulong),
+    (Member.Member_plain _matches tuint),
+    (Member.Member_plain _insert tuint),
+    (Member.Member_plain _bi_buf tushort),
+    (Member.Member_plain _bi_valid tint),
+    (Member.Member_plain _bi_used tint),
+    (Member.Member_plain _high_water tulong),
+    (Member.Member_plain _slid tint)]
+   noattr)]
 
 def global_definitions : List (Ident × GlobDef FunDef Ty) :=
 [(___compcert_va_int32,
@@ -417,11 +607,11 @@ def global_definitions : List (Ident × GlobDef FunDef Ty) :=
                                      { cc_vararg := (some 1), cc_unproto := false, cc_structret := false }))
      [tint] tvoid
      { cc_vararg := (some 1), cc_unproto := false, cc_structret := false })),
- (_is_sorted, GlobDef.Gfun (FunDef.Internal f_is_sorted)),
- (_main, GlobDef.Gfun (FunDef.Internal f_main))]
+ (_get_freq, GlobDef.Gfun (FunDef.Internal f_get_freq)),
+ (_set_freq, GlobDef.Gfun (FunDef.Internal f_set_freq))]
 
 def public_idents : List Ident :=
-[_main, _is_sorted, ___builtin_debug, ___builtin_fmin, ___builtin_fmax,
+[_set_freq, _get_freq, ___builtin_debug, ___builtin_fmin, ___builtin_fmax,
  ___builtin_fnmsub, ___builtin_fnmadd, ___builtin_fmsub, ___builtin_fmadd,
  ___builtin_clsll, ___builtin_clsl, ___builtin_cls, ___builtin_expect,
  ___builtin_unreachable, ___builtin_va_end, ___builtin_va_copy,
@@ -442,4 +632,5 @@ def public_idents : List Ident :=
 def prog : Program :=
   mkprogram composites global_definitions public_idents _main
 
-end Main
+end Treesep
+

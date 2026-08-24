@@ -163,6 +163,28 @@ let prologue = "\
 import Clightdefs\n\
 open CC\n"
 
+(* Every generated module declares the same identifiers (`prog`, `composites`,
+   `___builtin_fabsf`, …), so two of them cannot be imported into one Lean file
+   unless each lives in its own namespace.  Cross-module linking needs exactly
+   that, so the namespace is derived from the source file's basename:
+   `deflate.c` -> `namespace Deflate`. *)
+
+let module_namespace sourcefile =
+  let base = Filename.remove_extension (Filename.basename sourcefile) in
+  let cleaned =
+    String.map
+      (fun c -> match c with
+         | 'A'..'Z' | 'a'..'z' | '0'..'9' | '_' -> c
+         | _ -> '_')
+      base in
+  if cleaned = "" then "Src"
+  else match cleaned.[0] with
+    | 'a'..'z' ->
+        String.make 1 (Char.uppercase_ascii cleaned.[0])
+        ^ String.sub cleaned 1 (String.length cleaned - 1)
+    | 'A'..'Z' -> cleaned
+    | _ -> "Src" ^ cleaned
+
 (* Naming the compiler-generated temporaries occurring in the program *)
 
 let rec name_expr = function
@@ -224,6 +246,8 @@ let print_program p prog sourcefile normalized =
   fprintf p "@[<v 0>";
   fprintf p "%s" prologue;
   fprintf p "@ ";
+  let ns = module_namespace sourcefile in
+  fprintf p "namespace %s@ @ " ns;
   print_gen_info ~sourcefile ~normalized p;
   define_idents p;
   List.iter (print_globdef p) prog.Ctypes.prog_defs;
@@ -239,4 +263,5 @@ let print_program p prog sourcefile normalized =
   fprintf p "def prog : Program :=@ ";
   fprintf p "  mkprogram composites global_definitions public_idents %a@ @ "
             ident prog.Ctypes.prog_main;
+  fprintf p "end %s@ " ns;
   fprintf p "@]@."

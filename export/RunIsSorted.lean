@@ -3,6 +3,7 @@
 import GenMain
 import CCLib
 open CC
+open Main   -- the generated module now lives in its own namespace
 
 /-- Store `vals` as 32-bit ints at the start of a fresh block, and return the
     block plus the updated memory. -/

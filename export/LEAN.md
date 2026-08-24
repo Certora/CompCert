@@ -44,11 +44,21 @@ semantics worth trusting.
 | Interpreter | `CCLib/ClightExec.lean` + `ClightExecSound.lean` | 1,064 | executable `doStep`, proved sound |
 | Program logic | `CCLib/Hoare.lean` + `HoareArray.lean` | 524 | 15 Hoare rules + array support |
 | The proof | `IsSortedReal.lean`, `IsSortedRealCheck.lean` | 555 | the milestone, and its non-vacuity check |
+| Memory lemmas | `CCLib/{Maps,Memdata,Memory}Lemmas.lean`, `MemCheck.lean` | 833 | store/load algebra for the separation logic (Phase 7.1) |
 | Validation | `test/lean/` | — | 4-level differential suite + whole-program harness |
 
 No `sorry` anywhere.
 
 ## 3. How: the exporter
+
+**Generated modules are namespaced.**  Each `clightgen -lean` output is wrapped
+in a namespace derived from its source basename (`deflate.c` -> `namespace
+Deflate`), so several generated modules can be imported into one file — which is
+what cross-module linking needs, and which was impossible before (every module
+declared `prog`, `___builtin_fabsf`, … at the root namespace).  A consumer needs
+one `open <Ns>` line; a harness that generates a module should *read* the
+namespace out of the file rather than recompute the naming rule.
+
 
 `-lean` makes `clightgen` print Lean instead of Rocq:
 
@@ -278,7 +288,95 @@ pairwise distinct, and the AST well-formedness side conditions of
 which the kernel will not reduce. Every other theorem takes distinctness as an
 explicit hypothesis and is therefore axiom-free.
 
-## 9. What this does **not** give you
+## 9. In progress: separation logic and function calls
+
+The logic above cannot say "this code does not touch the rest of the heap" — it
+has no `∗` and no frame rule — and it has no rule for function calls. Those turn
+out to be one problem rather than two: a call rule needs **no change** to the
+triple (it is already continuation-agnostic, and `callCont (Kcall …) = Kcall …`,
+so a callee's triple instantiated at `k := Kcall optid f e le k` composes), but
+without `∗` a caller cannot keep the memory it did not lend to the callee. So
+separation logic comes first.
+
+The agreed shape: unique ownership with one permission per heap cell (no
+fractions), a whole-program closure theorem for recursion, and `forward`-style
+tactics.
+
+One design constraint worth recording: **VST's step-indexed `semax_func` cannot
+be ported here.** Step-indexing works for VST because `semax` is a *safety*
+property; this triple is total-correctness, so `∀ n, Satisfies_n f S` yields no
+execution and the induction does not close. The adaptation is a spec table where
+each spec carries a well-founded **measure on its arguments**, with closure by
+induction on that measure — which handles mutual recursion, since the measure is
+global.
+
+### Phases 7.1–7.7 (done)
+
+All seven landed: the memory lemma library (7.1), the heap resource algebra
+(7.2), the assertion layer with `mapsto`/`arrayU32` (7.3), the reframed triple
+with the **frame rule** (7.4), the call rule and a **whole-program closure
+theorem** (7.5), proof automation (7.6), and the migration (7.7) — about 3,500
+lines, no `sorry`, no `native_decide`.
+
+The end point is `IsSortedSep.is_sorted_satisfies`: `is_sorted` **meets a
+separation-logic specification**, so it is callable through `Sep.triple_call` and
+the frame rule applies. The non-separating proof could only describe one fixed
+memory; this one says what the function does to the part it owns and nothing about
+the rest, which is what makes it composable with a caller.
+
+Two design results worth recording. `triple_frame` was **almost free** —
+reassociating a union is the whole proof — because the triple carries an arbitrary
+frame and `Agrees` pins the frame's contents in both the before- and after-memory.
+And VST's step-indexed `semax_func` **cannot** be ported: step-indexing gives
+safety, not termination, so `∀ n, Satisfies_n` yields no execution under a
+total-correctness triple. The replacement is a spec table where each spec carries a
+well-founded measure on its arguments; both self- and mutual recursion close under
+it.
+
+What is *not* done: no fractional permissions (unique ownership only), no magic
+wand, no struct/field predicates, no rules for `Sswitch`/`Sgoto`, no frame
+inference, and no concrete recursive program proved against a spec — the closure
+theorem's usability is validated on abstract bodies only.
+
+### Phase 7.1 — the memory lemma library (done)
+
+The prerequisite, and the item budgeted as the schedule risk. `Memory.lean`
+shipped with 4 theorems and `Memdata.lean` with 1; a points-to predicate needs
+the store/load algebra on top. Delivered in `CCLib/MapsLemmas.lean`,
+`CCLib/MemdataLemmas.lean`, `CCLib/MemoryLemmas.lean` and `MemCheck.lean` — 833
+lines, 78 theorems, no `sorry`, **no `native_decide`**, axioms limited to Lean's
+standard three:
+
+* **`decodeVal_encodeVal : decodeVal chunk (encodeVal chunk v) = Val.loadResult chunk v`**,
+  all 66 chunk×value cases — the anticipated case explosion did not materialize.
+* **`load_store_same`** and **`load_store_other`**: what a store reads back, and
+  that a disjoint load is unaffected. The second is the fact the frame rule needs.
+* The alloc/free layer for function entry and exit: a fresh block is `Freeable`
+  and reads as `Undef`, and neither allocation nor freeing disturbs another block.
+* `ZMap.gso` — which `Maps.lean` never had, and which every `getN`/`setN` lemma
+  rests on. It needed a four-lemma scaffold down to `(Positive.ofNat n).toNat = n`.
+
+Three things made it cheap. `Archi.big_endian = false`, so `revIfBe` is the
+identity and all byte-order reasoning disappears. `Float`/`Float32` are structures
+wrapping their bit pattern, so the float round trip is `rfl` — the Flocq
+substitution paying off again. And `Nat.and_two_pow_sub_one_eq_mod` from Lean's
+core did the low-bit work.
+
+One tool was **refused on purpose**: `bv_decide` would have closed several of
+these instantly, but it discharges through `Lean.ofReduceBool`, a
+native-evaluation axiom. Putting that in the memory model would contaminate the
+axiom report of every theorem above it, and that report is one of the few real
+guarantees this port offers.
+
+`MemCheck.lean` guards against the lemmas being true but vacuous: each headline
+lemma is instantiated at a concrete memory and the conclusion computed, all by
+`decide` rather than `native_decide`. The one to note is `frame_preserved` — a
+store at offset 4 provably does not disturb offset 0. **These checks cannot be run
+against CompCert's own model at all**, since `Mem.store`/`load` are not evaluable
+in Rocq; they are a genuine advantage of the Lean port rather than a substitute
+for something Rocq does better.
+
+## 10. What this does **not** give you
 
 Stated plainly, because it is the most important section.
 
@@ -289,8 +387,10 @@ Stated plainly, because it is the most important section.
 - **Trusted base**: the `clightgen` frontend (shared with the Rocq path), the
   transcription fidelity of the port (mitigated, not eliminated, by §7), the
   float substitution, and Lean itself.
-- **This is a Hoare logic, not separation logic.** Assertions are plain
-  predicates on the state; there is no `∗` and no frame rule. Separating
+- **There are now two logics.** `CCLib/Hoare.lean` is the original Hoare logic
+  (no `∗`, no frame rule, no calls); `CCLib/SepHoare.lean` + `CCLib/Funspec.lean`
+  are the separation logic that supersedes it (§9).  The limits below that concern
+  the *absence* of `∗` apply to the former only. Separating
   conjunction needs a way to split CompCert's memory (permissions and contents
   together) — VST's "juicy memory" layer, and the single largest piece of that
   project. Deliberately out of scope.
@@ -303,7 +403,7 @@ Stated plainly, because it is the most important section.
   `Composite` and `Genv` drop their `Prop` invariants; `Program` stores a
   *computed* `prog_comp_env` rather than the equality proof.
 
-## 10. Reproducing it
+## 11. Reproducing it
 
 **Build `clightgen`.** Use the dedicated opam switch — system Rocq 9.2 breaks
 the vendored Flocq (`Zmod` was removed):
@@ -329,7 +429,7 @@ bash test/lean/diff_all.sh       # the four operation levels — 71,222 checks
 bash test/lean/diff_exec.sh      # whole programs vs ccomp -interp
 ```
 
-## 11. File map
+## 12. File map
 
 ```
 export/
@@ -342,19 +442,34 @@ export/
     Ctypes Cop                                   types and operators
     Globalenvs Events Clight                     the step relation
     ClightExec ClightExecSound                   interpreter + soundness
-    Hoare HoareArray                             the program logic
+    Hoare HoareArray HoareLong Temps             the program logic
+    Heap SepLogic SepHoare Funspec Tactics       the SEPARATION logic
+    FunPtr                                       calls through pointers
+    Aggregate                                    arrays (split/join), unions
+    Linking                                      cross-module linking
+    MapsLemmas MemdataLemmas MemoryLemmas        store/load algebra (Phase 7.1)
   GenMain.lean, Demo.lean             generated (main.c; every construct)
+                                      NOTE: both are namespaced BY HAND — Demo is
+                                      hand-authored and main.c no longer compiles
+                                      standalone.  Do not regenerate either.
+  Gen{Struct,Swap,FuncPtr,TreeSep}    generated test programs
+  Gen{Adler32,Deflate}, GenZ*         zlib's nine round-trip translation units
+  ZLink.lean                          all nine LINKED into one Program
+  TreeSep.lean                        s->dyn_ltree[k].Freq read AND written
+  DeflateMeasure.lean                 the full 61-field deflate_state predicate
   IsSortedReal.lean                   THE MILESTONE
   IsSortedRealCheck.lean              its non-vacuity check
+  MemCheck.lean                       non-vacuity for the memory lemmas
   ClightSem.lean, IsSortedProof.lean  SUPERSEDED toy model + proof
   SemCheck RunMain RunIsSorted        sanity runners
 test/lean/
-  check.sh diff_all.sh diff_exec.sh   the three harnesses
+  check.sh diff_all.sh diff_exec.sh   the harnesses
+  adler_diff.sh adler_oracle.c        the Adler-32 model vs zlib's own
   gen_*.py mem_oracle.ml *Diff.lean   oracles and generators
   corpus/                             16 hand-written C programs
 ```
 
-## 12. Findings worth keeping
+## 13. Findings worth keeping
 
 Things that cost real time and would cost it again.
 

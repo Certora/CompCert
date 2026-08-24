@@ -1,7 +1,7 @@
 import Clightdefs
 open CC
 
-namespace Main
+namespace Structs2
 
 namespace Info
   def version : String := "3.17"
@@ -13,7 +13,7 @@ namespace Info
   def abi : String := "apple"
   def bitsize : Nat := 64
   def big_endian : Bool := false
-  def source_file : String := "main.c"
+  def source_file : String := "structs2.c"
   def normalized : Bool := true
 end Info
 
@@ -71,86 +71,33 @@ def ___compcert_va_composite : Ident := identOfString "__compcert_va_composite"
 def ___compcert_va_float64 : Ident := identOfString "__compcert_va_float64"
 def ___compcert_va_int32 : Ident := identOfString "__compcert_va_int32"
 def ___compcert_va_int64 : Ident := identOfString "__compcert_va_int64"
-def _first : Ident := identOfString "first"
-def _i : Ident := identOfString "i"
-def _is_sorted : Ident := identOfString "is_sorted"
-def _last : Ident := identOfString "last"
-def _len : Ident := identOfString "len"
+def _gety : Ident := identOfString "gety"
 def _main : Ident := identOfString "main"
-def _numbers : Ident := identOfString "numbers"
+def _q : Ident := identOfString "q"
+def _st : Ident := identOfString "st"
+def _x : Ident := identOfString "x"
+def _y : Ident := identOfString "y"
 def _t'1 : Ident := (Positive.ofNat 128)
-def _t'2 : Ident := (Positive.ofNat 129)
 
-def f_is_sorted : Function := {
-  fn_return := tbool,
+def f_gety : Function := {
+  fn_return := tuint,
   fn_callconv := cc_default,
-  fn_params := [(_numbers, (tptr tuint)), (_len, tint)],
+  fn_params := [(_q, (tptr (Ty.Tstruct _st noattr)))],
   fn_vars := [],
-  fn_temps := [(_last, tuint), (_first, tbool), (_i, tint), (_t'2, tuint),
-               (_t'1, tuint)],
+  fn_temps := [(_t'1, tuint)],
   fn_body :=
 (Stmt.Ssequence
-  (Stmt.Sifthenelse (Expr.Ebinop Binop.Ole (Expr.Etempvar _len tint)
-                      (Expr.Econst_int (Integers.Int.repr 1) tint) tint)
-    (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 1) tint)))
-    Stmt.Sskip)
-  (Stmt.Ssequence
-    (Stmt.Sset _last
-      (Expr.Ederef
-        (Expr.Ebinop Binop.Oadd (Expr.Etempvar _numbers (tptr tuint))
-          (Expr.Econst_int (Integers.Int.repr 0) tint) (tptr tuint)) tuint))
-    (Stmt.Ssequence
-      (Stmt.Sset _first
-        (Expr.Ecast (Expr.Econst_int (Integers.Int.repr 1) tint) tbool))
-      (Stmt.Ssequence
-        (Stmt.Ssequence
-          (Stmt.Sset _i (Expr.Econst_int (Integers.Int.repr 1) tint))
-          (Stmt.Sloop
-            (Stmt.Ssequence
-              (Stmt.Sifthenelse (Expr.Ebinop Binop.Olt
-                                  (Expr.Etempvar _i tint)
-                                  (Expr.Etempvar _len tint) tint)
-                Stmt.Sskip
-                Stmt.Sbreak)
-              (Stmt.Ssequence
-                (Stmt.Sset _t'1
-                  (Expr.Ederef
-                    (Expr.Ebinop Binop.Oadd
-                      (Expr.Etempvar _numbers (tptr tuint))
-                      (Expr.Etempvar _i tint) (tptr tuint)) tuint))
-                (Stmt.Ssequence
-                  (Stmt.Sset _t'2
-                    (Expr.Ederef
-                      (Expr.Ebinop Binop.Oadd
-                        (Expr.Etempvar _numbers (tptr tuint))
-                        (Expr.Ebinop Binop.Osub (Expr.Etempvar _i tint)
-                          (Expr.Econst_int (Integers.Int.repr 1) tint) tint)
-                        (tptr tuint)) tuint))
-                  (Stmt.Sifthenelse (Expr.Ebinop Binop.Olt
-                                      (Expr.Etempvar _t'1 tuint)
-                                      (Expr.Etempvar _t'2 tuint) tint)
-                    (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 0) tint)))
-                    Stmt.Sskip))))
-            (Stmt.Sset _i
-              (Expr.Ebinop Binop.Oadd (Expr.Etempvar _i tint)
-                (Expr.Econst_int (Integers.Int.repr 1) tint) tint))))
-        (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 1) tint)))))))
-}
-
-def f_main : Function := {
-  fn_return := tint,
-  fn_callconv := cc_default,
-  fn_params := [],
-  fn_vars := [],
-  fn_temps := [],
-  fn_body :=
-(Stmt.Ssequence
-  (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 0) tint)))
-  (Stmt.Sreturn (some (Expr.Econst_int (Integers.Int.repr 0) tint))))
+  (Stmt.Sset _t'1
+    (Expr.Efield
+      (Expr.Ederef (Expr.Etempvar _q (tptr (Ty.Tstruct _st noattr)))
+        (Ty.Tstruct _st noattr)) _y tuint))
+  (Stmt.Sreturn (some (Expr.Etempvar _t'1 tuint))))
 }
 
 def composites : List CompositeDef :=
-[]
+[(CompositeDef.Composite _st SU.Struct
+   [(Member.Member_plain _x tuint), (Member.Member_plain _y tuint)]
+   noattr)]
 
 def global_definitions : List (Ident × GlobDef FunDef Ty) :=
 [(___compcert_va_int32,
@@ -417,11 +364,10 @@ def global_definitions : List (Ident × GlobDef FunDef Ty) :=
                                      { cc_vararg := (some 1), cc_unproto := false, cc_structret := false }))
      [tint] tvoid
      { cc_vararg := (some 1), cc_unproto := false, cc_structret := false })),
- (_is_sorted, GlobDef.Gfun (FunDef.Internal f_is_sorted)),
- (_main, GlobDef.Gfun (FunDef.Internal f_main))]
+ (_gety, GlobDef.Gfun (FunDef.Internal f_gety))]
 
 def public_idents : List Ident :=
-[_main, _is_sorted, ___builtin_debug, ___builtin_fmin, ___builtin_fmax,
+[_gety, ___builtin_debug, ___builtin_fmin, ___builtin_fmax,
  ___builtin_fnmsub, ___builtin_fnmadd, ___builtin_fmsub, ___builtin_fmadd,
  ___builtin_clsll, ___builtin_clsl, ___builtin_cls, ___builtin_expect,
  ___builtin_unreachable, ___builtin_va_end, ___builtin_va_copy,
@@ -442,4 +388,5 @@ def public_idents : List Ident :=
 def prog : Program :=
   mkprogram composites global_definitions public_idents _main
 
-end Main
+end Structs2
+

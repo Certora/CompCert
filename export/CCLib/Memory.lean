@@ -138,6 +138,28 @@ theorem rangePerm_perm (m : Mem) (b : Block) (lo hi : Int) (k : PermKind)
   simp only [spanNat]
   omega
 
+/-- Converse of `rangePerm_perm`: build a `rangePerm` from pointwise permissions.
+    Lives here because `rangePermAux`/`spanNat` are `private`; Phase-7 proofs
+    outside this file need a way to *introduce* a `rangePerm`, not just use one. -/
+theorem rangePerm_intro (m : Mem) (b : Block) (lo hi : Int) (k : PermKind)
+    (p : Permission) (h : ∀ ofs : Int, lo ≤ ofs → ofs < hi → perm m b ofs k p = true) :
+    rangePerm m b lo hi k p = true := by
+  simp only [rangePerm]
+  suffices hgen : ∀ (n : Nat) (lo' : Int),
+      (∀ ofs : Int, lo' ≤ ofs → ofs < lo' + (n : Int) → perm m b ofs k p = true) →
+      rangePermAux m b lo' n k p = true by
+    refine hgen (spanNat lo hi) lo (fun ofs h1 h2 => h ofs h1 ?_)
+    simp only [spanNat] at h2
+    omega
+  intro n
+  induction n with
+  | zero => intro lo' _; rfl
+  | succ j ih =>
+      intro lo' hall
+      simp only [rangePermAux, Bool.and_eq_true]
+      refine ⟨hall lo' (Int.le_refl _) (by omega), ih (lo' + 1) (fun ofs h1 h2 => ?_)⟩
+      exact hall ofs (by omega) (by omega)
+
 /-- A block carrying any permission is below `nextblock`. -/
 theorem perm_valid_block (m : Mem) (b : Block) (ofs : Int) (k : PermKind)
     (p : Permission) (h : perm m b ofs k p = true) : b < m.nextblock := by

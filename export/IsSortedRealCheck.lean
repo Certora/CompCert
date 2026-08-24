@@ -12,6 +12,7 @@
 -/
 import IsSortedReal
 open CC IsSortedReal
+open Main   -- the generated module now lives in its own namespace
 
 namespace IsSortedRealCheck
 
@@ -25,7 +26,7 @@ def memOf : Option Mem := do
   let m ← Mem.store .Mint32 m blk.2 8 (.Vint (Integers.Int.repr 30))
   pure m
 
-theorem memOf_isSome : memOf.isSome = true := by native_decide
+theorem memOf_isSome : memOf.isSome = true := by decide
 
 def mem : Mem := memOf.get memOf_isSome
 
@@ -41,13 +42,13 @@ def ge3 : CGenv := prog.globalenv
 theorem arr3_in_mem : ArrU32 ge3.genv_cenv mem blk.2 (Integers.Ptrofs.repr 0) 3 arr3 := by
   intro i h0 h3
   have hcase : i = 0 ∨ i = 1 ∨ i = 2 := by omega
-  rcases hcase with h | h | h <;> subst h <;> native_decide
+  rcases hcase with h | h | h <;> subst h <;> decide
 
 theorem arr3_sorted :
     ∀ j : _root_.Int, 1 ≤ j → j < 3 → Integers.Int.ltu (arr3 j) (arr3 (j-1)) = false := by
   intro j h1 h3
   have hcase : j = 1 ∨ j = 2 := by omega
-  rcases hcase with h | h <;> subst h <;> native_decide
+  rcases hcase with h | h <;> subst h <;> decide
 
 /-- **Unconditional execution.**  Calling `is_sorted` on the concrete array
     `[10, 20, 30]` runs, under CompCert's Clight step relation, from the

@@ -7,6 +7,8 @@
 import Clightdefs
 open CC
 
+namespace Demo
+
 namespace Info
 def version : String := "3.17"
 def build_number : String := ""
@@ -109,3 +111,5 @@ section Coverage
 #check (tvolatile_alignas 3 tint)
 #check (tvolatile tuchar)
 end Coverage
+
+end Demo

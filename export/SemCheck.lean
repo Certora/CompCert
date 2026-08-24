@@ -5,6 +5,7 @@
    shown to be inhabited by deriving actual transitions. -/
 import GenMain
 open CC
+open Main   -- the generated module now lives in its own namespace
 
 -- (1) executable parts, on the program generated from main.c
 #eval prog.prog_defs.length                              -- global definitions
