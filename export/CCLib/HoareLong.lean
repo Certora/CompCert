@@ -310,6 +310,17 @@ theorem u32_toNat_repr (n : Nat) :
     (Integers.Int.repr ((n : _root_.Int))).toNat = n % 4294967296 := by
   rw [u32_repr_ofNat, BitVec.toNat_ofNat]
 
+/-- 32-bit addition of two `Nat`s, mod 2^32 — the `unsigned int` analogue of
+    `u64_add`.  A loop counter increment needs it. -/
+theorem u32_add (a b : Nat) :
+    Integers.Int.add (Integers.Int.repr ((a : _root_.Int)))
+        (Integers.Int.repr ((b : _root_.Int)))
+      = Integers.Int.repr (((a + b : Nat) : _root_.Int)) := by
+  apply BitVec.eq_of_toNat_eq
+  show (_ + _ : BitVec 32).toNat = _
+  rw [BitVec.toNat_add, u32_toNat_repr, u32_toNat_repr, u32_toNat_repr]
+  omega
+
 theorem u32_unsigned (n : Nat) (h : n < 4294967296) :
     Integers.Int.unsigned (Integers.Int.repr ((n : _root_.Int))) = (n : _root_.Int) := by
   show (((Integers.Int.repr ((n : _root_.Int))).toNat : _root_.Int)) = _

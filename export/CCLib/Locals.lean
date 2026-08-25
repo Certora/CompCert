@@ -203,6 +203,40 @@ theorem undefBytes_split {chunk : Chunk} (p : Permission) (b : Block)
       undefBytes_mapsto p b (ofs + (d : _root_.Int)) henc halign,
       ← sep_assoc_eq, sep_comm_eq (undefBytes p b ofs d), sep_assoc_eq]
 
+/-- **Peel one undefined `u16` cell off the front.**
+
+    `arrayU16`'s element predicate cannot express an undefined element, so the
+    zeroing-loop invariant of `inflate_table` (inftrees.c:116-117) has to be
+    "initialized `arrayU16` prefix ∗ `undefBytes` suffix".  This is the lemma that
+    moves the boundary: it turns the first two bytes of the suffix into the
+    `mapsto` a store can go through.
+
+    The alignment hypothesis is genuine, not bookkeeping: `undefBytes` carries no
+    alignment and `mapsto` does.  Clients use this at `ofs = 2 * len`, where it is
+    `omega`. -/
+theorem undefBytes_uncons_u16 (p : Permission) (b : Block) (ofs : _root_.Int)
+    (n : Nat) (hal : ofs % 2 = 0) :
+    undefBytes p b ofs (2 * (n + 1))
+      = mapsto .Mint16unsigned p b ofs .Vundef
+        ∗ undefBytes p b (ofs + 2) (2 * n) := by
+  rw [undefBytes_split (chunk := .Mint16unsigned) p b ofs (2 * (n + 1)) 0
+        undefEncoded_Mint16unsigned
+        (by show (ofs + ((0 : Nat) : _root_.Int)) % 2 = 0
+            omega)
+        (by show 0 + sizeChunkNat .Mint16unsigned ≤ 2 * (n + 1)
+            show 0 + 2 ≤ 2 * (n + 1)
+            omega),
+      -- compound offset first: collapsing `ofs + ↑0` early destroys the pattern
+      show ofs + ((0 : Nat) : _root_.Int)
+             + ((sizeChunkNat .Mint16unsigned : Nat) : _root_.Int) = ofs + 2 from by
+        show ofs + ((0 : Nat) : _root_.Int) + ((2 : Nat) : _root_.Int) = ofs + 2
+        omega,
+      show ofs + ((0 : Nat) : _root_.Int) = ofs from by omega,
+      show 2 * (n + 1) - 0 - sizeChunkNat .Mint16unsigned = 2 * n from by
+        show 2 * (n + 1) - 0 - 2 = 2 * n
+        omega,
+      undefBytes_zero, emp_sep_eq]
+
 /-! ## The fresh block a local lives in
 
 `Mem.alloc` produces `Freeable` permission over `[0, n)` and `Undef` contents, so
@@ -415,6 +449,83 @@ theorem undefBytes_rangePerm {b : Block} {n : Nat} {h : Heap} {m : Mem}
   have hrp := Heap.Agrees_rangePerm hag hown .Cur
   rw [List.length_replicate] at hrp
   simpa using hrp
+
+/-! ### Freeing a block whose contents are no longer `undef`
+
+`undefBytes_rangePerm` above is too specialized for a real return: by then
+`count`/`offs` are fully-written `arrayU16`s and `here` is three field `mapsto`s,
+none of which is `undefBytes` any more.
+
+The generalization is one line, because `Heap.Agrees_rangePerm` is already stated
+over `ownsRange` and `bytesPtsTo_ownsRange` already bridges to it.  So rather than
+a new "owned block" predicate, everything reduces to *getting the fragment into
+`bytesPtsTo` form* — and the three lemmas that do that (`mapsto_eq_bytes`,
+`bytesPtsTo_append`, `arrayU16_bytes` below) already exist or are added here. -/
+
+/-- **The workhorse.**  Any owned byte run gives the `rangePerm` a free needs, at
+    whatever permission it is held. -/
+theorem bytesPtsTo_rangePerm {p : Permission} {b : Block} {ofs : _root_.Int}
+    {vl : List MemVal} {h : Heap} {m : Mem}
+    (hb : bytesPtsTo b p ofs vl h) (hag : Heap.Agrees h m) :
+    Mem.rangePerm m b ofs (ofs + (vl.length : _root_.Int)) .Cur p = true :=
+  Heap.Agrees_rangePerm hag (bytesPtsTo_ownsRange b p vl ofs h hb) .Cur
+
+/-- The bytes an `arrayU16` holds, front to back. -/
+def u16Bytes (f : Nat → Nat) : Nat → List MemVal
+  | 0 => []
+  | n + 1 => u16Bytes f n
+             ++ encodeVal .Mint16unsigned (.Vint (Integers.Int.repr ((f n : Nat))))
+
+theorem u16Bytes_length (f : Nat → Nat) : ∀ n, (u16Bytes f n).length = 2 * n
+  | 0 => rfl
+  | n + 1 => by
+      show (u16Bytes f n
+             ++ encodeVal .Mint16unsigned
+                  (.Vint (Integers.Int.repr ((f n : Nat))))).length = 2 * (n + 1)
+      rw [List.length_append, u16Bytes_length f n, length_encodeVal]
+      show 2 * n + sizeChunkNat .Mint16unsigned = 2 * (n + 1)
+      show 2 * n + 2 = 2 * (n + 1)
+      omega
+
+/-- **An `arrayU16` *is* a byte run.**  Proved with `arrayOf_snoc` and
+    `bytesPtsTo_append`, one element at a time.  This is what lets a
+    fully-initialized local be freed at return, and it is also the bridge a
+    functional proof needs when it has to look at `count`/`offs` as memory. -/
+theorem arrayU16_bytes (p : Permission) (b : Block) (ofs : _root_.Int)
+    (f : Nat → Nat) (hal : ofs % 2 = 0) :
+    ∀ n, arrayU16 p b ofs n f = bytesPtsTo b p ofs (u16Bytes f n)
+  | 0 => rfl
+  | n + 1 => by
+      show arrayOf (u16elt p b f) 2 ofs (n + 1) = _
+      rw [arrayOf_snoc]
+      show arrayU16 p b ofs n f
+            ∗ u16elt p b f n (ofs + 2 * (n : _root_.Int)) = _
+      rw [arrayU16_bytes p b ofs f hal n]
+      show bytesPtsTo b p ofs (u16Bytes f n)
+            ∗ mapsto .Mint16unsigned p b (ofs + 2 * (n : _root_.Int))
+                (.Vint (Integers.Int.repr ((f n : Nat)))) = _
+      rw [mapsto_eq_bytes (chunk := .Mint16unsigned)
+            (by show (ofs + 2 * (n : _root_.Int)) % 2 = 0
+                omega)]
+      show _ = bytesPtsTo b p ofs
+                (u16Bytes f n
+                 ++ encodeVal .Mint16unsigned (.Vint (Integers.Int.repr ((f n : Nat)))))
+      rw [bytesPtsTo_append, u16Bytes_length f n]
+      show _ = bytesPtsTo b p ofs (u16Bytes f n)
+                ∗ bytesPtsTo b p (ofs + ((2 * n : Nat) : _root_.Int)) _
+      rw [show ofs + ((2 * n : Nat) : _root_.Int) = ofs + 2 * (n : _root_.Int) from by
+            omega]
+
+/-- The corollary a return site wants: a fully-written `u16` local is
+    `Freeable` over its whole extent. -/
+theorem arrayU16_rangePerm {b : Block} {n : Nat} {f : Nat → Nat}
+    {h : Heap} {m : Mem}
+    (ha : arrayU16 .Freeable b 0 n f h) (hag : Heap.Agrees h m) :
+    Mem.rangePerm m b 0 ((2 * n : Nat) : _root_.Int) .Cur .Freeable = true := by
+  rw [arrayU16_bytes .Freeable b 0 f (by omega) n] at ha
+  have h1 := bytesPtsTo_rangePerm ha hag
+  rw [u16Bytes_length f n] at h1
+  simpa using h1
 
 /-! ## D2 — a fresh local as a struct
 

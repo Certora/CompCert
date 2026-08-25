@@ -383,6 +383,21 @@ theorem arrayU16_update (p : Permission) (b : Block) (ofs : _root_.Int) (n : Nat
   rw [arrayU16, h]
   simp [u16elt]
 
+/-- **Append one element at the end** — an equality, so it also peels the last
+    one off.  The dual of `arrayOf_split`, which extracts from the middle. -/
+theorem arrayOf_snoc (elt : Nat → _root_.Int → HProp) (stride ofs : _root_.Int)
+    (n : Nat) :
+    arrayOf elt stride ofs (n + 1)
+      = arrayOf elt stride ofs n ∗ elt n (ofs + stride * (n : _root_.Int)) := by
+  show arrayFrom (fun i => elt i (ofs + stride * (i : _root_.Int))) 0 (n + 1) = _
+  rw [arrayFrom_append (fun i => elt i (ofs + stride * (i : _root_.Int))) n 0 1,
+      Nat.zero_add]
+  show arrayOf elt stride ofs n
+        ∗ (elt n (ofs + stride * (n : _root_.Int))
+           ∗ arrayFrom (fun i => elt i (ofs + stride * (i : _root_.Int))) (n + 1) 0) = _
+  rw [show arrayFrom (fun i => elt i (ofs + stride * (i : _root_.Int))) (n + 1) 0
+         = emp from rfl, sep_emp_eq]
+
 /-- **Reading element `i`.**  Owning the array is enough; the rest is absorbed
     into `mapsto_load`'s frame. -/
 theorem arrayU16_load (p : Permission) (b : Block)
@@ -396,6 +411,88 @@ theorem arrayU16_load (p : Permission) (b : Block)
   subst heq
   have hl := mapsto_load hpr hel (Heap.Agrees_union_left hag)
   simpa [Val.loadResult, zero_ext16_repr (f i) (hb i)] using hl
+
+/-- **Grow the initialized prefix by one.**  The zeroing-loop invariant in
+    `inflate_table` (inftrees.c:116-117) is "initialized prefix ∗ undefined
+    suffix", and this is the step that moves one cell across the boundary.
+
+    The element function is oriented as `arrayU16_update`'s is
+    (`if j = n then v else f j`) so client rewrites compose without `funext`. -/
+theorem arrayU16_snoc (p : Permission) (b : Block) (ofs : _root_.Int) (n : Nat)
+    (f : Nat → Nat) (v : Nat) :
+    arrayU16 p b ofs n f
+      ∗ mapsto .Mint16unsigned p b (ofs + 2 * (n : _root_.Int))
+          (.Vint (Integers.Int.repr ((v : Nat))))
+      = arrayU16 p b ofs (n + 1) (fun j => if j = n then v else f j) := by
+  show _ = arrayOf (u16elt p b (fun j => if j = n then v else f j)) 2 ofs (n + 1)
+  rw [arrayOf_snoc,
+      arrayOf_congr (elt' := u16elt p b f) 2 ofs n
+        (fun j hj => by funext off; simp [u16elt, show j ≠ n from by omega])]
+  simp [u16elt, arrayU16]
+
+/-! ### Indexing a `u16` array
+
+`eval_index_lvalue` (`CCLib.SepHoare`) already derives the address at any element
+type; this adds the load.  Every indexed array in `inflate_table` — the `lens[]`
+and `work[]` parameters, the `count[16]`/`offs[16]` locals — is `unsigned short`,
+and none of them could be read before. -/
+
+/-- `sizeof cenv tushort = 2`, in any composite environment: `tushort` is a base
+    type, so this needs no `decide` against a particular program. -/
+theorem sizeof_tushort (cenv : CompositeEnv) : sizeof cenv tushort = 2 := by
+  simp [sizeof, tushort]
+
+/-- The `haddr` obligation of `eval_index_u16`, discharged.  Clients supply the
+    index bound and the no-wrap bound; the stride is settled here. -/
+theorem u16Ofs_unsigned (cenv : CompositeEnv) (si : Signedness)
+    (ofs0 : Integers.Ptrofs) (i : Nat)
+    (hi : (i : _root_.Int) < 2147483648)
+    (hno : Integers.Ptrofs.unsigned ofs0 + 2 * (i : _root_.Int)
+             < 18446744073709551616) :
+    Integers.Ptrofs.unsigned
+        (Sep.idxOfs cenv tushort si ofs0 (Integers.Int.repr ((i : _root_.Int))))
+      = Integers.Ptrofs.unsigned ofs0 + 2 * (i : _root_.Int) := by
+  -- the only gap is the `Nat`-to-`Int` cast on the stride; `omega` is blind to
+  -- `Ptrofs.unsigned`, which sits at `CC.Z`, so close it by rewriting the cast
+  -- rather than by arithmetic
+  have h2 : ((2 : Nat) : _root_.Int) = 2 := rfl
+  have h := Sep.idxOfs_unsigned cenv tushort si ofs0 i 2
+    (by rw [sizeof_tushort]; rfl) (by decide) hi (by rw [h2]; exact hno)
+  rw [h2] at h
+  exact h
+
+/-- **Reading `base[idx]` out of an owned `u16` array.**
+
+    The index's signedness is a parameter (`hcls`, `rfl` at every site), because
+    `inflate_table` indexes with `tuint` temporaries as often as with `tint`.
+    `hb` is where `arrayU16_load`'s `zero_ext16_repr` comes from — the client's
+    arrays satisfy it structurally. -/
+theorem eval_index_u16 {ge : CGenv} {e : Env} {le : TempEnv} {m : Mem}
+    {p : Permission} {b : Block} {ofs0 : Integers.Ptrofs} {n : Nat}
+    {f : Nat → Nat} {h : Heap} {base idx : Expr} {i : Nat} {si : Signedness}
+    (hpr : permOrder p .Readable = true)
+    (harr : arrayU16 p b (Integers.Ptrofs.unsigned ofs0) n f h)
+    (hag : Heap.Agrees h m) (hi : i < n) (hb : ∀ j, f j < 65536)
+    (hptr : EvalExpr ge e le m base (.Vptr b ofs0))
+    (hidx : EvalExpr ge e le m idx (.Vint (Integers.Int.repr ((i : _root_.Int)))))
+    (hcls : Cop.classifyAdd (typeof base) (typeof idx) = .pi tushort si)
+    (haddr : Integers.Ptrofs.unsigned
+               (Sep.idxOfs ge.genv_cenv tushort si ofs0
+                 (Integers.Int.repr ((i : _root_.Int))))
+             = Integers.Ptrofs.unsigned ofs0 + 2 * (i : _root_.Int)) :
+    EvalExpr ge e le m
+      (.Ederef (.Ebinop .Oadd base idx (tptr tushort)) tushort)
+      (.Vint (Integers.Int.repr ((f i : Nat)))) := by
+  refine EvalExpr.Elvalue _ b
+    (Sep.idxOfs ge.genv_cenv tushort si ofs0 (Integers.Int.repr ((i : _root_.Int))))
+    .Full _ (Sep.eval_index_lvalue hptr hidx hcls) ?_
+  refine DerefLoc.value .Mint16unsigned _ rfl ?_
+  show Mem.load .Mint16unsigned m b
+        (Integers.Ptrofs.unsigned
+          (Sep.idxOfs ge.genv_cenv tushort si ofs0
+            (Integers.Int.repr ((i : _root_.Int))))) = _
+  rw [haddr]
+  exact arrayU16_load p b hpr n f i hi hb _ h m harr hag
 
 /-! ## `arrayU8` and `arrayU32` are instances
 

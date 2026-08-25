@@ -318,6 +318,55 @@ theorem triple_switch (ge fe f) (P : Assn) (R : ExitConds) (a : Expr) (sl : LStm
       -- `callCont (Kswitch k) = callCont k`, so the endpoint already matches
       exact ⟨.Return v' m', hp', Steps.trans (Steps.one hstart) hs, hd', hag', hR⟩
 
+/-- **`switch` with the scrutinee pinned.**
+
+    `triple_switch` above demands the body at *every* scrutinee value.  When the
+    precondition already fixes the scrutinee — as `inflate_table`'s does, because
+    the spec cases on `type ∈ {CODES, LENS, DISTS}` before reaching the switch —
+    that would leave triples owed for the two unreachable arms against the same
+    postcondition, provable only by weakening `R` into a disjunction over all
+    three arms' effects, which then pollutes every later step.
+
+    This is `triple_switch`'s proof with `n := n₀`; the `∀ n` there is consumed
+    exactly once, at the selected value, so nothing else changes.  It is a copy
+    rather than a derivation because `triple_switch`'s `hsel` produces its `n`
+    per-state, so it cannot be instantiated at a single `n₀` up front. -/
+theorem triple_switch_const (ge fe f) (P : Assn) (R : ExitConds) (a : Expr)
+    (sl : LStmts) (n₀ : Z)
+    (hbody : Triple ge fe f P (seqOfLabeledStatement (selectSwitch n₀ sl))
+      { normal := R.normal, brk := R.normal, cont := R.cont, ret := R.ret,
+        goto := R.goto })
+    (hsel : ∀ e le hp m, P e le hp → Heap.Agrees hp m →
+            ∃ v, EvalExpr ge e le m a v
+                 ∧ Cop.semSwitchArg v (typeof a) = some n₀) :
+    Triple ge fe f P (.Sswitch a sl) R := by
+  intro k e le hp hf m hd hag hP
+  obtain ⟨v, hev, hsw⟩ := hsel e le hp m hP (Heap.Agrees_union_left hag)
+  have hstart : SStep ge fe (.State f (.Sswitch a sl) k e le m)
+                            (.State f (seqOfLabeledStatement (selectSwitch n₀ sl))
+                              (.Kswitch k) e le m) :=
+    Step.switch f a sl k e le m v n₀ hev hsw
+  obtain ⟨o, hp', hs, hd', hag', hR⟩ :=
+    hbody (.Kswitch k) e le hp hf m hd hag hP
+  cases o with
+  | Goto lbl e' le' m' =>
+      exact ⟨.Goto lbl e' le' m', hp', Steps.trans (Steps.one hstart) hs,
+             hd', hag', hR⟩
+  | Normal e' le' m' =>
+      refine ⟨.Normal e' le' m', hp', ?_, hd', hag', hR⟩
+      refine Steps.trans (Steps.one hstart) (Steps.trans hs ?_)
+      exact Steps.one (Step.skip_break_switch f .Sskip k e' le' m' (.inl rfl))
+  | Break e' le' m' =>
+      refine ⟨.Normal e' le' m', hp', ?_, hd', hag', hR⟩
+      refine Steps.trans (Steps.one hstart) (Steps.trans hs ?_)
+      exact Steps.one (Step.skip_break_switch f .Sbreak k e' le' m' (.inr rfl))
+  | Continue e' le' m' =>
+      refine ⟨.Continue e' le' m', hp', ?_, hd', hag', hR⟩
+      refine Steps.trans (Steps.one hstart) (Steps.trans hs ?_)
+      exact Steps.one (Step.continue_switch f k e' le' m')
+  | Return v' m' =>
+      exact ⟨.Return v' m', hp', Steps.trans (Steps.one hstart) hs, hd', hag', hR⟩
+
 /-! ## The loop rule
 
 Unchanged in shape from the non-separating version: a `Nat` measure that must
@@ -746,6 +795,12 @@ theorem eval_field_copy {ge : CGenv} {e : Env} {le : TempEnv} {m : Mem}
       hptr hstruct hco hfld)
     (DerefLoc.copy hacc)
 
+/-- `Ptrofs.unsigned 0 = 0`.  Trivial, but every client that owns an object at
+    offset 0 of its own block needs it, and it was being reproved inline. -/
+theorem ptrofs_unsigned_zero : Integers.Ptrofs.unsigned Integers.Ptrofs.zero = 0 := by
+  simp [Integers.Ptrofs.unsigned, Integers.Ptrofs.zero, Integers.MI.unsigned,
+        Integers.MI.zero]
+
 /-- Adding zero to a pointer offset — union member offsets are always 0. -/
 theorem ptrofs_add_zero (x : Integers.Ptrofs) :
     Integers.Ptrofs.add x (Integers.Ptrofs.repr 0) = x := by
@@ -815,6 +870,130 @@ theorem semAdd_ptr_int (cenv : CompositeEnv) (m : Mem) (b : Block)
   unfold Cop.semAdd
   rw [hcls]
   rfl
+
+/-! ## Indexing at an arbitrary element type
+
+`eval_index_array` above is fixed at `tuint`/`arrayU32`/`Mint32`, and its index
+must be `tint`.  Neither fits `inflate_table`, whose arrays are all
+`unsigned short` and whose indices are `tuint` temporaries.  The pieces below
+generalize on both axes, and split the *address* derivation out of the *load* —
+which is what lets a write site (`count[len] = 0`) reuse it without dragging in
+a heap it does not need. -/
+
+/-- The address of `base[i]` for element type `ty` and index signedness `si` —
+    the general form `semAdd_ptr_int` produces.  `elemOfs` (u32, `HoareArray`)
+    and `byteOfs` (u8, `HoareLong`) are the two instances that already existed. -/
+def idxOfs (cenv : CompositeEnv) (ty : Ty) (si : Signedness)
+    (ofs0 : Integers.Ptrofs) (iv : Integers.Int) : Integers.Ptrofs :=
+  Integers.Ptrofs.add ofs0
+    (Integers.Ptrofs.mul (Integers.Ptrofs.repr (sizeof cenv ty))
+      (Cop.ptrofsOfInt si iv))
+
+/-- **Signedness collapses on a nonnegative index.**  `ptrofsOfInt` picks
+    `of_ints` or `of_intu`, and on `Int.repr i` with `i < 2^31` they agree — so a
+    lemma parametrized over `si` needs only one proof, and a client indexing with
+    a `tuint` temporary pays nothing extra over a `tint` one. -/
+theorem ptrofsOfInt_repr (si : Signedness) (i : Nat)
+    (hi : (i : _root_.Int) < 2147483648) :
+    Cop.ptrofsOfInt si (Integers.Int.repr ((i : _root_.Int)))
+      = Integers.Ptrofs.repr ((i : _root_.Int)) := by
+  cases si with
+  | Signed =>
+      show Integers.Ptrofs.of_ints _ = _
+      show Integers.MI.repr (Integers.MI.signed (Integers.Int.repr ((i : _root_.Int)))) = _
+      rw [show Integers.MI.signed (Integers.Int.repr ((i : _root_.Int)))
+             = (i : _root_.Int) from toInt_repr _ (by omega) hi]
+      rfl
+  | Unsigned =>
+      -- `of_intu` is a zero-EXTEND of the 32-bit word, not a `repr` of its
+      -- unsigned value, so this one goes through `toNat` rather than a rewrite
+      show Integers.Ptrofs.of_intu (Integers.Int.repr ((i : _root_.Int))) = _
+      apply BitVec.eq_of_toNat_eq
+      simp only [Integers.Ptrofs.of_intu, Integers.Ptrofs.of_int,
+                 Integers.Ptrofs.repr, Integers.Int.repr, Integers.MI.repr,
+                 BitVec.toNat_setWidth, BitVec.toNat_ofInt, Archi.ptrWordsize_eq]
+      omega
+
+private theorem idx_arith (A sz i : Nat)
+    (hno : (A : _root_.Int) + (sz : _root_.Int) * (i : _root_.Int)
+             < 18446744073709551616) :
+    (((A + sz * i % 18446744073709551616) % 18446744073709551616 : Nat) : _root_.Int)
+      = (A : _root_.Int) + (sz : _root_.Int) * (i : _root_.Int) := by
+  omega
+
+/-- The address arithmetic, once, for any element size.  `hsz` is supplied by the
+    client as a `decide` against its own composite environment (`sizeof cenv
+    tushort = 2`), which keeps this lemma environment-generic.
+
+    `sizeof` nonnegativity is not provable in this port, which is why the size
+    arrives as a `Nat` through `hsz` rather than being reasoned about in place. -/
+theorem idxOfs_unsigned (cenv : CompositeEnv) (ty : Ty) (si : Signedness)
+    (ofs0 : Integers.Ptrofs) (i sz : Nat)
+    (hsz : sizeof cenv ty = (sz : _root_.Int))
+    (hszlt : sz < 18446744073709551616)
+    (hi : (i : _root_.Int) < 2147483648)
+    (hno : Integers.Ptrofs.unsigned ofs0 + (sz : _root_.Int) * (i : _root_.Int)
+             < 18446744073709551616) :
+    Integers.Ptrofs.unsigned (idxOfs cenv ty si ofs0 (Integers.Int.repr ((i : _root_.Int))))
+      = Integers.Ptrofs.unsigned ofs0 + (sz : _root_.Int) * (i : _root_.Int) := by
+  have hw : (2 : Nat) ^ Archi.ptrWordsize = 18446744073709551616 := by
+    rw [Archi.ptrWordsize_eq]
+  rw [idxOfs, ptrofsOfInt_repr si i hi, hsz]
+  simp only [Integers.Ptrofs.add, Integers.Ptrofs.mul, Integers.Ptrofs.unsigned,
+             Integers.Ptrofs.repr, Integers.MI.add, Integers.MI.mul,
+             Integers.MI.repr, Integers.MI.unsigned,
+             BitVec.toNat_add, BitVec.toNat_mul, BitVec.toNat_ofInt, hw] at hno ⊢
+  have hs : (((sz : Nat) : _root_.Int) % ((18446744073709551616 : Nat) : _root_.Int)).toNat
+              = sz := by omega
+  have hii : (((i : Nat) : _root_.Int) % ((18446744073709551616 : Nat) : _root_.Int)).toNat
+              = i := by omega
+  rw [hs, hii]
+  exact idx_arith _ _ _ hno
+
+/-- **`base[idx]` as an l-value, at any element type.**
+
+    Pure address arithmetic — no heap, no permission, no array predicate.  This is
+    what `triple_assign`'s and `triple_assign_copy`'s `hsplit` consume at a write
+    site (`count[len] = 0`, `work[…] = sym`, `*(*table)++ = here`), and factoring
+    it out keeps the read path from duplicating the derivation.
+
+    `hcls` is `rfl` at every concrete site; it is a hypothesis only so that the
+    index's signedness is not baked in. -/
+theorem eval_index_lvalue {ge : CGenv} {e : Env} {le : TempEnv} {m : Mem}
+    {b : Block} {ofs0 : Integers.Ptrofs} {base idx : Expr} {iv : Integers.Int}
+    {ty : Ty} {si : Signedness}
+    (hptr : EvalExpr ge e le m base (.Vptr b ofs0))
+    (hidx : EvalExpr ge e le m idx (.Vint iv))
+    (hcls : Cop.classifyAdd (typeof base) (typeof idx) = .pi ty si) :
+    EvalLvalue ge e le m (.Ederef (.Ebinop .Oadd base idx (tptr ty)) ty)
+      b (idxOfs ge.genv_cenv ty si ofs0 iv) .Full :=
+  EvalLvalue.Ederef _ _ _ _
+    (EvalExpr.Ebinop .Oadd _ _ _ (.Vptr b ofs0) (.Vint iv) _ hptr hidx
+      (semAdd_ptr_int _ _ _ _ _ hcls))
+
+/-! ## `Evar`, packaged
+
+Both cases were being rebuilt inline at every use site (`LocalVarSep` does it
+twice).  They are one-liners; the point of naming them is that a client reading
+`Evar _count` / `Evar _lbase` should not have to remember which constructor and
+which side conditions each needs. -/
+
+/-- A block-scoped variable: its address is the environment's binding, at
+    offset 0. -/
+theorem eval_var_local {ge : CGenv} {e : Env} {le : TempEnv} {m : Mem}
+    {id : Ident} {ty : Ty} {b : Block} (h : e.get id = some (b, ty)) :
+    EvalLvalue ge e le m (.Evar id ty) b Integers.Ptrofs.zero .Full :=
+  EvalLvalue.Evar_local id b ty h
+
+/-- A global: the *absence* of a local binding plus the symbol table.  The `hno`
+    side condition is the one clients forget — see `allocVariables_env_other` in
+    `CCLib.Locals` for turning "not one of the `fn_vars`" into it. -/
+theorem eval_var_global {ge : CGenv} {e : Env} {le : TempEnv} {m : Mem}
+    {id : Ident} {ty : Ty} {b : Block}
+    (hno : e.get id = none)
+    (hsym : Genv.findSymbol ge.genv_genv id = some b) :
+    EvalLvalue ge e le m (.Evar id ty) b Integers.Ptrofs.zero .Full :=
+  EvalLvalue.Evar_global id b ty hno hsym
 
 /-! ## Assignment
 
