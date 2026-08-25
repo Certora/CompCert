@@ -245,6 +245,30 @@ theorem triple_return (ge fe f) (P : Assn) (Ret : Val → HProp) (a : Expr)
   exact ⟨.Return v' m', hp',
          Steps.one (Step.return_1 f a k e le m v v' m' hev hcast hfree), hd', hag', hRet⟩
 
+/-- **`return;`** — the void return.  `triple_return` above covers
+    `Sreturn (some a)` only, so before this there was no rule for a `void`
+    function's exit.  `put` in `test/lean/structcopy.c` needs it, and so does
+    every `void` function on the zlib path.
+
+    Found while building the acceptance test for `triple_assign_copy`: the brief
+    for that rule assumed the test's `FunSpec` would go through, and this is one
+    of the two reasons it does not. -/
+theorem triple_return_none (ge fe f) (P : Assn) (Ret : Val → HProp)
+    (h : ∀ e le hp m, P e le hp → Heap.Agrees hp m →
+      ∃ m' hp',
+        Mem.freeList m (blocksOfEnv ge.genv_cenv e) = some m'
+        ∧ Ret .Vundef hp'
+        ∧ (∀ hf, Heap.disjoint hp hf → Heap.Agrees (Heap.union hp hf) m →
+              Heap.disjoint hp' hf ∧ Heap.Agrees (Heap.union hp' hf) m')) :
+    Triple ge fe f P (.Sreturn none)
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := Ret } := by
+  intro k e le hp hf m hd hag hP
+  obtain ⟨m', hp', hfree, hRet, hframe⟩ :=
+    h e le hp m hP (Heap.Agrees_union_left hag)
+  obtain ⟨hd', hag'⟩ := hframe hf hd hag
+  exact ⟨.Return .Vundef m', hp',
+         Steps.one (Step.return_0 f k e le m m' hfree), hd', hag', hRet⟩
+
 /-! ## `switch`
 
 `Sswitch` selects a labelled-statement suffix, runs it under `Kswitch`, and there
@@ -835,6 +859,142 @@ theorem triple_assign (ge fe f) (P Q : Assn) (a1 a2 : Expr) (chunk : Chunk)
   · show Heap.Agrees (Heap.union (Heap.union h1' h2) hf) m'
     rw [Heap.union_assoc]; exact hag1'
   · exact hQ h1' hm1' hd1'.1
+
+/-! ## Aggregate assignment (`accessMode = By_copy`)
+
+`triple_assign` above is hardwired to `AssignLoc.value` — a chunked `Mem.store`.
+A C **struct assignment** (`*p = here;`) has `accessMode (Tstruct …) = .By_copy`
+and goes through `AssignLoc.copy` instead: a raw `loadbytes`/`storebytes` block
+copy.  zlib's `inflate_table` writes its whole decoding table that way
+(`*(*table)++ = here;`, inftrees.c:130-131, 243, 304), so without this rule no
+proof can step over those statements at all.
+
+The proof is `memcpy_satisfies` (`CCLib.Funspec`) with a different step taken:
+the ingredients — `bytesPtsTo_loadbytes`, `bytesPtsTo_storebytes`, and
+`Heap.disjoint_ranges_nonoverlap` for the non-overlap disjunction — are the same. -/
+
+/-- **Small-footprint rule for aggregate assignment.**  `a1 = a2` where both sides
+    have struct or union type: the source is read as raw bytes and the
+    destination window is overwritten with them.
+
+    **Non-overlap is not a hypothesis.**  `AssignLoc.copy` demands that the two
+    windows be disjoint (or identical), and the `∗` between the source and
+    destination fragments already proves it —
+    `Heap.disjoint_ranges_nonoverlap` reads it straight off the ownership.  Only
+    the two `alignofBlockcopy` conditions and the size bookkeeping are
+    hypotheses; at a use site both alignments are `decide` against the concrete
+    composite environment.
+
+    The aliased case that `AssignLoc.copy` also permits (`ofs' = ofs`, a
+    self-assignment) is deliberately **not** covered: the precondition's `∗`
+    rules it out, and zlib never self-assigns.
+
+    The split is `hDst ∗ (hSrc ∗ hRest)` with the destination outermost, because
+    the destination is the fragment operated on and that ordering is what
+    `bytesPtsTo_storebytes` wants — the same rearrangement `memcpy_satisfies`
+    performs by hand. -/
+theorem triple_assign_copy (ge fe f) (P Q : Assn) (a1 a2 : Expr)
+    (psrc pdst : Permission)
+    (bsrc : Block) (osrc : Integers.Ptrofs)
+    (bdst : Block) (odst : Integers.Ptrofs)
+    (srcBytes oldBytes : List MemVal)
+    (hpr : permOrder psrc .Readable = true)
+    (hpw : permOrder pdst .Writable = true)
+    (hacc : accessMode (typeof a1) = .By_copy)
+    (hsz : ((srcBytes.length : Nat) : _root_.Int) = sizeof ge.genv_cenv (typeof a1))
+    (hlen : oldBytes.length = srcBytes.length)
+    (halsrc : sizeof ge.genv_cenv (typeof a1) > 0 →
+        Integers.Ptrofs.unsigned osrc % alignofBlockcopy ge.genv_cenv (typeof a1) = 0)
+    (haldst : sizeof ge.genv_cenv (typeof a1) > 0 →
+        Integers.Ptrofs.unsigned odst % alignofBlockcopy ge.genv_cenv (typeof a1) = 0)
+    (hsplit : ∀ e le hp m, P e le hp → Heap.Agrees hp m →
+        ∃ hSrc hDst hRest,
+          Heap.disjoint hSrc hRest
+          ∧ Heap.disjoint hDst (Heap.union hSrc hRest)
+          ∧ hp = Heap.union hDst (Heap.union hSrc hRest)
+          ∧ bytesPtsTo bsrc psrc (Integers.Ptrofs.unsigned osrc) srcBytes hSrc
+          ∧ bytesPtsTo bdst pdst (Integers.Ptrofs.unsigned odst) oldBytes hDst
+          ∧ EvalLvalue ge e le m a1 bdst odst .Full
+          ∧ EvalExpr ge e le m a2 (.Vptr bsrc osrc)
+          ∧ Cop.semCast (.Vptr bsrc osrc) (typeof a2) (typeof a1) m
+              = some (.Vptr bsrc osrc)
+          ∧ (∀ hDst', bytesPtsTo bdst pdst (Integers.Ptrofs.unsigned odst)
+                        srcBytes hDst' →
+                Heap.disjoint hDst' (Heap.union hSrc hRest) →
+                Q e le (Heap.union hDst' (Heap.union hSrc hRest)))) :
+    Triple ge fe f P (.Sassign a1 a2) (.only Q) := by
+  intro k e le hp hf m hdo hag hP
+  obtain ⟨hSrc, hDst, hRest, hdsr, hddr, heq, hsm, hdm, hlv, hev, hcast, hQ⟩ :=
+    hsplit e le hp m hP (Heap.Agrees_union_left hag)
+  subst heq
+  -- ── rearrange: the destination is operated on, everything else is frame ───
+  rw [Heap.disjoint_union_left] at hdo
+  have hdf : Heap.disjoint hDst (Heap.union (Heap.union hSrc hRest) hf) := by
+    rw [Heap.disjoint_union_right]; exact ⟨hddr, hdo.1⟩
+  have hagd : Heap.Agrees
+      (Heap.union hDst (Heap.union (Heap.union hSrc hRest) hf)) m := by
+    rw [← Heap.union_assoc]; exact hag
+  -- the source only has to be *readable*, and it is: it is part of `hp`
+  have hags : Heap.Agrees hSrc m :=
+    Heap.Agrees_union_left
+      (Heap.Agrees_union_right hddr (Heap.Agrees_union_left hag))
+  -- ── the load, at the length `AssignLoc.copy` asks for ────────────────────
+  have hload : Mem.loadbytes m bsrc (Integers.Ptrofs.unsigned osrc)
+                 (sizeof ge.genv_cenv (typeof a1)) = some srcBytes := by
+    rw [← hsz]; exact bytesPtsTo_loadbytes hpr hsm hags
+  -- ── the store ─────────────────────────────────────────────────────────────
+  obtain ⟨m', hDst', hstore, hdm', hd'f, hag'⟩ :=
+    bytesPtsTo_storebytes hpw hlen.symm hdm hdf hagd
+  -- ── non-overlap, read off the `∗` rather than assumed ─────────────────────
+  have hno : bsrc ≠ bdst
+             ∨ Integers.Ptrofs.unsigned osrc = Integers.Ptrofs.unsigned odst
+             ∨ Integers.Ptrofs.unsigned osrc + sizeof ge.genv_cenv (typeof a1)
+                 ≤ Integers.Ptrofs.unsigned odst
+             ∨ Integers.Ptrofs.unsigned odst + sizeof ge.genv_cenv (typeof a1)
+                 ≤ Integers.Ptrofs.unsigned osrc := by
+    by_cases hb : bsrc = bdst
+    · subst hb
+      rw [← hsz]
+      have hdsd : Heap.disjoint hSrc hDst := by
+        have h := hddr
+        rw [Heap.disjoint_union_right] at h
+        exact Heap.disjoint_comm h.1
+      rcases Heap.disjoint_ranges_nonoverlap hdsd rfl hlen
+          (bytesPtsTo_ownsRange _ psrc srcBytes _ hSrc hsm)
+          (bytesPtsTo_ownsRange _ pdst oldBytes _ hDst hdm) with hx | hx
+      · exact Or.inr (Or.inr (Or.inl hx))
+      · exact Or.inr (Or.inr (Or.inr hx))
+    · exact Or.inl hb
+  -- ── the step, and reassembly ──────────────────────────────────────────────
+  rw [Heap.disjoint_union_right] at hd'f
+  refine ⟨.Normal e le m', Heap.union hDst' (Heap.union hSrc hRest), ?_, ?_, ?_, ?_⟩
+  · exact Steps.one (Step.assign f a1 a2 k e le m bdst odst .Full
+      (.Vptr bsrc osrc) (.Vptr bsrc osrc) m' hlv hev hcast
+      (AssignLoc.copy bsrc osrc srcBytes m' hacc halsrc haldst hno hload hstore))
+  · rw [Heap.disjoint_union_left]; exact ⟨hd'f.2, hdo.2⟩
+  · show Heap.Agrees
+      (Heap.union (Heap.union hDst' (Heap.union hSrc hRest)) hf) m'
+    rw [Heap.union_assoc]; exact hag'
+  · exact hQ hDst' hdm' hd'f.1
+
+/-- The cast in a struct-to-same-struct assignment is the identity.  `semCast`
+    on `.struct id id` returns the pointer unchanged (`Cop.lean:232`), so this
+    discharges `triple_assign_copy`'s `hcast` whenever both sides have literally
+    the same struct type — which is every one of zlib's four sites. -/
+theorem semCast_struct_same (b : Block) (o : Integers.Ptrofs) (id : Ident)
+    (at1 at2 : Attr) (m : Mem) :
+    Cop.semCast (.Vptr b o) (Ty.Tstruct id at1) (Ty.Tstruct id at2) m
+      = some (.Vptr b o) := by
+  show (if id = id then some (Val.Vptr b o) else none) = _
+  simp
+
+/-- …and for unions, which `inflate_table` does not use but the rule covers. -/
+theorem semCast_union_same (b : Block) (o : Integers.Ptrofs) (id : Ident)
+    (at1 at2 : Attr) (m : Mem) :
+    Cop.semCast (.Vptr b o) (Ty.Tunion id at1) (Ty.Tunion id at2) m
+      = some (.Vptr b o) := by
+  show (if id = id then some (Val.Vptr b o) else none) = _
+  simp
 
 /-! ## Function entry and exit
 

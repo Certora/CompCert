@@ -67,6 +67,50 @@ theorem bytesPtsTo_append (b : Block) (p : Permission) :
           show (ofs + 1) + ((l1'.length : Nat) : _root_.Int)
              = ofs + ((l1'.length + 1 : Nat) : _root_.Int) from by push_cast; omega]
 
+/-- **Carving a window out of an unknown-contents region.**  The companion to
+    `bytesPtsTo_append` at the `anyBytes` level, and an equality, so it also
+    re-joins.
+
+    This is what a client needs to write one `struct code` slot into a table
+    region: split `anyBytes … (4 * cap)` at the slot, hand the 4-byte window to
+    `triple_assign_copy`, and join the result back.  The result comes back as
+    `bytesPtsTo … srcBytes`, which weakens into `anyBytes` by supplying the
+    witness — one line, since `anyBytes` is exactly that existential. -/
+theorem anyBytes_split (p : Permission) (b : Block) (ofs : _root_.Int)
+    (n₁ n₂ : Nat) :
+    anyBytes p b ofs (n₁ + n₂)
+      = anyBytes p b ofs n₁ ∗ anyBytes p b (ofs + (n₁ : _root_.Int)) n₂ := by
+  funext h
+  refine propext ⟨fun hall => ?_, fun hsp => ?_⟩
+  · obtain ⟨bytes, hb⟩ := hall
+    obtain ⟨hlen, hbytes⟩ := pure_sep_elim hb
+    have hl1 : (bytes.take n₁).length = n₁ := by
+      rw [List.length_take]; omega
+    have hl2 : (bytes.drop n₁).length = n₂ := by
+      rw [List.length_drop]; omega
+    rw [show bytes = bytes.take n₁ ++ bytes.drop n₁ from
+          (List.take_append_drop n₁ bytes).symm,
+        bytesPtsTo_append, hl1] at hbytes
+    obtain ⟨h1, h2, hd, heq, hb1, hb2⟩ := hbytes
+    exact ⟨h1, h2, hd, heq, ⟨_, pure_sep_intro hl1 hb1⟩,
+           ⟨_, pure_sep_intro hl2 hb2⟩⟩
+  · obtain ⟨h1, h2, hd, heq, ha1, ha2⟩ := hsp
+    obtain ⟨bytes1, hb1⟩ := ha1
+    obtain ⟨bytes2, hb2⟩ := ha2
+    obtain ⟨hl1, hp1⟩ := pure_sep_elim hb1
+    obtain ⟨hl2, hp2⟩ := pure_sep_elim hb2
+    refine ⟨bytes1 ++ bytes2,
+      pure_sep_intro (by rw [List.length_append]; omega) ?_⟩
+    rw [bytesPtsTo_append, hl1]
+    exact ⟨h1, h2, hd, heq, hp1, hp2⟩
+
+/-- The direction a use site needs after the copy: concrete bytes weaken into
+    `anyBytes`.  Just supplying the witness. -/
+theorem anyBytes_of_bytesPtsTo {p : Permission} {b : Block} {ofs : _root_.Int}
+    {bytes : List MemVal} {h : Heap} (hb : bytesPtsTo b p ofs bytes h) :
+    anyBytes p b ofs bytes.length h :=
+  ⟨bytes, pure_sep_intro rfl hb⟩
+
 /-! ## Fresh locals: runs of `Undef` -/
 
 /-- `n` owned bytes at `b + ofs`, all `Undef` — exactly what `Mem.alloc` leaves

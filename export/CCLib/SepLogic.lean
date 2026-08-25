@@ -92,6 +92,12 @@ theorem pure_sep_intro {φ : Prop} {P : HProp} {h : Heap} (hφ : φ) (hP : P h) 
     (⌜φ⌝ ∗ P) h :=
   ⟨Heap.emp, h, Heap.disjoint_emp_left h, (Heap.emp_union h).symm, ⟨hφ, rfl⟩, hP⟩
 
+/-- A *true* pure conjunct drops out of a `∗` — it is `emp`.  Stated as an
+    equality so it can be rewritten under anything. -/
+theorem pure_true_sep_eq {φ : Prop} (hφ : φ) (P : HProp) : ⌜φ⌝ ∗ P = P := by
+  funext h
+  exact propext ⟨fun hs => (pure_sep_elim hs).2, fun hP => pure_sep_intro hφ hP⟩
+
 /-! ## The AC laws as equalities
 
 Entailments are not enough for `simp`; it needs `Eq`.  These follow from the
@@ -152,6 +158,15 @@ def bytesPtsTo (b : Block) (p : Permission) : Z → List MemVal → HProp
     owned at permission `p`.  Mirrors VST's `mapsto`. -/
 def mapsto (chunk : Chunk) (p : Permission) (b : Block) (ofs : Z) (v : Val) : HProp :=
   ⌜ofs % alignChunk chunk = 0⌝ ∗ bytesPtsTo b p ofs (encodeVal chunk v)
+
+/-- **`mapsto` is a byte run**, once its alignment side condition is known.
+    Definitional, but as an `Eq` it is the bridge a struct copy needs: the source
+    of an aggregate assignment is owned as field `mapsto`s and consumed as raw
+    bytes. -/
+theorem mapsto_eq_bytes {chunk : Chunk} {p : Permission} {b : Block}
+    {ofs : Z} {v : Val} (hal : ofs % alignChunk chunk = 0) :
+    mapsto chunk p b ofs v = bytesPtsTo b p ofs (encodeVal chunk v) := by
+  rw [mapsto, pure_true_sep_eq hal]
 
 /-! ## From `bytesPtsTo` to `Heap.ownsRange`
 
