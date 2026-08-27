@@ -46,6 +46,10 @@
                        soundness against the relation.  CompCert has no
                        executable Clight semantics, so this has no Rocq original.
   * `CCLib.ClightExecSound` — soundness of the interpreter against the relation.
+
+  * `CCLib.Determinism` — `Clight.semantics_determinate`: the step relation is a
+                       partial function up to `MatchTraces`, so ∀-run facts
+                       follow from ∃-run ones.  Adds two axioms (see the file).
 -/
 import CCLib.Archi
 import CCLib.Positive
@@ -79,3 +83,4 @@ import CCLib.FunPtr
 import CCLib.Aggregate
 import CCLib.Linking
 import CCLib.Locals
+import CCLib.Determinism

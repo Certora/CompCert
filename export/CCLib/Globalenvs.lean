@@ -175,5 +175,95 @@ def allocGlobals (ge : Genv F V) (m : Mem) :
       | none => none
       | some m' => allocGlobals ge m' gl'
 
+/-! ## The dropped `Genv` invariants, recovered as lemmas
+
+The header explains why `Genv` carries no `Prop` fields: nothing in
+`Clight.step` consumes them.  *Determinism* of that relation does — CompCert's
+`Senv.t` exposes `genv_vars_inj` as `find_symbol_injective`, and
+`Events.match_traces` needs it to pin the identifier recorded in a volatile
+event: two identifiers naming one block would let a single step emit two
+unrelated events.  So here are the two invariants, proved about `addGlobals`
+rather than carried by the record, exactly as the header anticipated. -/
+
+/-- CompCert's `genv_symb_range`: every symbol denotes an allocated block. -/
+def SymbBelow (ge : Genv F V) : Prop :=
+  ∀ id b, findSymbol ge id = some b → b < ge.genv_next
+
+/-- CompCert's `genv_vars_inj`: distinct identifiers denote distinct blocks. -/
+def SymbInjective (ge : Genv F V) : Prop :=
+  ∀ id1 id2 b, findSymbol ge id1 = some b → findSymbol ge id2 = some b → id1 = id2
+
+theorem symbBelow_emptyGenv (pub : List Ident) :
+    SymbBelow (emptyGenv pub : Genv F V) := by
+  intro id b h; simp [findSymbol, emptyGenv] at h
+
+theorem symbInjective_emptyGenv (pub : List Ident) :
+    SymbInjective (emptyGenv pub : Genv F V) := by
+  intro id1 id2 b h _; simp [findSymbol, emptyGenv] at h
+
+theorem symbBelow_addGlobal {ge : Genv F V} (idg : Ident × GlobDef F V)
+    (h : SymbBelow ge) : SymbBelow (addGlobal ge idg) := by
+  intro id b hb
+  have hlt : b.toNat < ge.genv_next.toNat + 1 := by
+    by_cases hid : idg.1 = id
+    · subst hid
+      simp only [findSymbol, addGlobal, PTree.gss] at hb
+      injection hb with hb
+      subst hb
+      omega
+    · simp only [findSymbol, addGlobal] at hb
+      rw [PTree.gso _ _ _ _ hid] at hb
+      have := (Positive.lt_iff _ _).1 (h id b hb)
+      omega
+  show b.toNat < (addGlobal ge idg).genv_next.toNat
+  simpa [addGlobal] using hlt
+
+theorem symbInjective_addGlobal {ge : Genv F V} (idg : Ident × GlobDef F V)
+    (hb : SymbBelow ge) (h : SymbInjective ge) : SymbInjective (addGlobal ge idg) := by
+  intro id1 id2 b h1 h2
+  simp only [findSymbol, addGlobal] at h1 h2
+  by_cases hd1 : idg.1 = id1
+  · by_cases hd2 : idg.1 = id2
+    · exact hd1.symm.trans hd2
+    · rw [PTree.gso _ _ _ _ hd2] at h2
+      subst hd1
+      rw [PTree.gss] at h1
+      injection h1 with h1
+      subst h1
+      exact absurd ((Positive.lt_iff _ _).1 (hb _ _ h2)) (Nat.lt_irrefl _)
+  · by_cases hd2 : idg.1 = id2
+    · rw [PTree.gso _ _ _ _ hd1] at h1
+      subst hd2
+      rw [PTree.gss] at h2
+      injection h2 with h2
+      subst h2
+      exact absurd ((Positive.lt_iff _ _).1 (hb _ _ h1)) (Nat.lt_irrefl _)
+    · rw [PTree.gso _ _ _ _ hd1] at h1
+      rw [PTree.gso _ _ _ _ hd2] at h2
+      exact h id1 id2 b h1 h2
+
+theorem symbBelow_addGlobals {ge : Genv F V} (gl : List (Ident × GlobDef F V))
+    (h : SymbBelow ge) : SymbBelow (addGlobals ge gl) := by
+  induction gl generalizing ge with
+  | nil => exact h
+  | cons g gl' ih =>
+      show SymbBelow (addGlobals (addGlobal ge g) gl')
+      exact ih (symbBelow_addGlobal g h)
+
+theorem symbInjective_addGlobals {ge : Genv F V} (gl : List (Ident × GlobDef F V))
+    (hb : SymbBelow ge) (h : SymbInjective ge) : SymbInjective (addGlobals ge gl) := by
+  induction gl generalizing ge with
+  | nil => exact h
+  | cons g gl' ih =>
+      show SymbInjective (addGlobals (addGlobal ge g) gl')
+      exact ih (symbBelow_addGlobal g hb) (symbInjective_addGlobal g hb h)
+
+/-- The invariant CompCert's `Genv.t` carries, for an environment built the only
+    way a program builds one (`Program.globalenv` is `addGlobals` over
+    `emptyGenv`). -/
+theorem symbInjective_globalenv (pub : List Ident) (gl : List (Ident × GlobDef F V)) :
+    SymbInjective (addGlobals (emptyGenv pub) gl) :=
+  symbInjective_addGlobals gl (symbBelow_emptyGenv pub) (symbInjective_emptyGenv pub)
+
 end Genv
 end CC

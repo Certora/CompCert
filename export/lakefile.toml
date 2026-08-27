@@ -41,6 +41,10 @@ name = "compcert-clight-lean"
 #                   against the published adler32("Wikipedia") value.  The model
 #                   is also checked against zlib's own adler32 by
 #                   test/lean/adler_diff.sh (200 random buffers).
+#   DetermCheck   : non-vacuity for CCLib.Determinism — determinism APPLIED to
+#                   derivable steps (a determinism theorem is trivially true of
+#                   an empty relation), plus the axiom guard for the two new
+#                   extcall_properties axioms
 #   TempsCheck    : Phase-9 Step 10 — the tracked-temporary state layer
 #                   (CCLib.Temps) is O(1) per statement, checked at 20 temps
 #   GenFuncPtr    : generated AST of test/lean/funcptr.c
@@ -77,7 +81,7 @@ name = "compcert-clight-lean"
 #                   meeting a spec.
 #
 # Build with:  lake build
-defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedSep", "GenSwap", "SwapSep", "GenStruct", "StructSep", "IsSortedRealCheck", "MemCheck", "SepCheck", "SemCheck", "RunMain", "RunIsSorted", "GenAdler32", "ZAdler32", "ZAdler32Check", "TempsCheck", "GenFuncPtr", "FuncPtrSep", "GenDeflate", "DeflateMeasure", "GenTreeSep", "TreeSep", "GenZCompress", "GenZUncompr", "GenZInflate", "GenZTrees", "GenZInftrees", "GenZInffast", "GenZZutil", "ZLink", "GenLocalVar", "LocalVarSep", "GenGotoLeave", "GotoSep", "GenGotoBack", "GotoBackSep", "InflateMeasure", "ZConfigAudit", "ZAdlerMath", "ZAdlerLoop", "GenStructCopy", "StructCopySep", "GenU16Loop", "U16LoopSep", "GenOOB", "OOBSep"]
+defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedSep", "GenSwap", "SwapSep", "GenStruct", "StructSep", "IsSortedRealCheck", "MemCheck", "SepCheck", "SemCheck", "RunMain", "RunIsSorted", "GenAdler32", "ZAdler32", "ZAdler32Check", "TempsCheck", "GenFuncPtr", "FuncPtrSep", "GenDeflate", "DeflateMeasure", "GenTreeSep", "TreeSep", "GenZCompress", "GenZUncompr", "GenZInflate", "GenZTrees", "GenZInftrees", "GenZInffast", "GenZZutil", "ZLink", "GenLocalVar", "LocalVarSep", "GenGotoLeave", "GotoSep", "GenGotoBack", "GotoBackSep", "InflateMeasure", "ZConfigAudit", "ZAdlerMath", "ZAdlerLoop", "GenStructCopy", "StructCopySep", "GenU16Loop", "U16LoopSep", "GenOOB", "OOBSep", "DetermCheck"]
 
 [[lean_lib]]
 name = "CCLib"
@@ -144,6 +148,9 @@ name = "ZAdler32Check"
 
 [[lean_lib]]
 name = "TempsCheck"
+
+[[lean_lib]]
+name = "DetermCheck"
 
 [[lean_lib]]
 name = "GenFuncPtr"
