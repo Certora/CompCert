@@ -280,6 +280,161 @@ theorem satisfies_internal_goto (ge fe f) (S : FunSpec) (vargs : List Val)
         rw [if_neg hl'] at hx
         exact False.elim hx
 
+/-! ### When the label's target does not stand alone
+
+`findLabel` returns the *labelled statement*, with whatever follows it pushed onto
+the continuation.  `satisfies_internal_goto` above verifies that statement with
+`normal := Assn.no`, i.e. it must return or jump on every path -- so it does not
+apply when the labelled statement falls through and the rest of the work happens
+from the continuation.  That is zlib's shape: `inflate`'s `inf_leave:` labels only
+the `RESTORE()` do-while, and the whole cleanup tail sits under a `Kseq`
+(`fv/InflateAST.lean:label_resolves`).
+
+`LandsReturn` is the obligation such a target actually owes -- *from the landing
+state, reach a `Returnstate` at the ambient call continuation* -- and it composes
+forward through the pushed frames, so no step-inversion (hence no determinism
+hypothesis) is needed. -/
+
+/-- From the landing state `.State f s kland`, reach `.Returnstate _ kret`.
+
+    `kland` is where `findLabel` puts control; `kret` is where the caller expects
+    the function to return.  They differ by exactly the frames `findLabel`
+    rebuilt, which the composition lemmas below peel one at a time. -/
+def LandsReturn (ge : CGenv) (fe : EntryRel) (f : Function) (P : Assn) (s : Stmt)
+    (kland kret : Cont) (Ret : Val → HProp) : Prop :=
+  ∀ e le hp hf m,
+    Heap.disjoint hp hf → Heap.Agrees (Heap.union hp hf) m → P e le hp →
+    ∃ v m' hp',
+      Steps (SStep ge fe) (.State f s kland e le m) (.Returnstate v kret m')
+      ∧ Heap.disjoint hp' hf ∧ Heap.Agrees (Heap.union hp' hf) m' ∧ Ret v hp'
+
+/-- A statement that can only return already lands: a `Triple` holds at every
+    continuation, and its `Return` outcome is a `Returnstate` at `callCont`. -/
+theorem landsReturn_of_triple (ge fe f) {P : Assn} {s : Stmt} {Ret : Val → HProp}
+    (k : Cont)
+    (h : Triple ge fe f P s
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := Ret }) :
+    LandsReturn ge fe f P s k (callCont k) Ret := by
+  intro e le hp hf m hd hag hP
+  obtain ⟨o, hp', hs, hd', hag', hR⟩ := h k e le hp hf m hd hag hP
+  cases o with
+  | Normal _ _ _ => exact False.elim hR
+  | Break _ _ _ => exact False.elim hR
+  | Continue _ _ _ => exact False.elim hR
+  | Goto _ _ _ _ => exact False.elim hR
+  | Return v m' => exact ⟨v, m', hp', hs, hd', hag', hR⟩
+
+/-- **Peel one `Kseq`.**  The labelled statement runs under `Kseq s₂ k`, falls
+    through, and `s₂` carries on at `k`.  `s₁` is verified with `.only`, which is
+    right: a `RESTORE()`-style prologue neither returns nor jumps. -/
+theorem landsReturn_seq (ge fe f) (P Q : Assn) {Ret : Val → HProp}
+    (s1 s2 : Stmt) (k kret : Cont)
+    (h1 : Triple ge fe f P s1 (.only Q))
+    (h2 : LandsReturn ge fe f Q s2 k kret Ret) :
+    LandsReturn ge fe f P s1 (.Kseq s2 k) kret Ret := by
+  intro e le hp hf m hd hag hP
+  obtain ⟨o1, hp1, hs1, hd1, hag1, hR1⟩ := h1 (.Kseq s2 k) e le hp hf m hd hag hP
+  cases o1 with
+  | Break _ _ _ => exact False.elim hR1
+  | Continue _ _ _ => exact False.elim hR1
+  | Return _ _ => exact False.elim hR1
+  | Goto _ _ _ _ => exact False.elim hR1
+  | Normal e' le' m' =>
+      obtain ⟨v, m'', hp2, hs2, hd2, hag2, hRet⟩ := h2 e' le' hp1 hf m' hd1 hag1 hR1
+      refine ⟨v, m'', hp2, ?_, hd2, hag2, hRet⟩
+      exact Steps.trans hs1 (Steps.step _ _ _ (Step.skip_seq f s2 k e' le' m') hs2)
+
+/-- Weaken a landing obligation. -/
+theorem landsReturn_conseq (ge fe f) {P P' : Assn} {s kland kret}
+    {Ret Ret' : Val → HProp}
+    (h : LandsReturn ge fe f P s kland kret Ret)
+    (hP : ∀ e le hp, P' e le hp → P e le hp)
+    (hr : ∀ v hp, Ret v hp → Ret' v hp) :
+    LandsReturn ge fe f P' s kland kret Ret' := by
+  intro e le hp hf m hd hag hP'
+  obtain ⟨v, m', hp', hs, hd', hag', hRet⟩ := h e le hp hf m hd hag (hP e le hp hP')
+  exact ⟨v, m', hp', hs, hd', hag', hr v hp' hRet⟩
+
+/-- **The forward-`goto` rule, with the target stated where it actually lands.**
+
+    `satisfies_internal_goto` is the special case in which the labelled statement
+    itself returns; here the obligation is `LandsReturn` at `kcont kk`, which the
+    lemmas above build by peeling the frames `findLabel` rebuilt. -/
+theorem satisfies_internal_goto_lands (ge fe f) (S : FunSpec) (vargs : List Val)
+    (Pbody G : Assn) (lbl : Ident) (starget : Stmt) (kcont : Cont → Cont)
+    (hentry : ∀ (m : Mem) (hp hf : Heap), S.pre vargs hp → Heap.disjoint hp hf →
+        Heap.Agrees (Heap.union hp hf) m →
+        ∃ (e : Env) (le : TempEnv) (m1 : Mem) (hl : Heap),
+          fe f vargs m e le m1
+          ∧ Heap.disjoint (Heap.union hp hl) hf
+          ∧ Heap.Agrees (Heap.union (Heap.union hp hl) hf) m1
+          ∧ Pbody e le (Heap.union hp hl))
+    (hbody : Triple ge fe f Pbody f.fn_body
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := S.post,
+        goto := fun l => if l = lbl then G else Assn.no })
+    (hfind : ∀ kk : Cont, findLabel lbl f.fn_body kk = some (starget, kcont kk))
+    (htarget : ∀ kk : Cont, isCallCont kk = true →
+        LandsReturn ge fe f G starget (kcont kk) kk S.post) :
+    SatisfiesAt ge fe (.Internal f) S vargs := by
+  intro k m hp hf hk hpre hd hag
+  have hck : callCont k = k := callCont_of_isCallCont hk
+  obtain ⟨e, le, m1, hl, hent, hd1, hag1, hPb⟩ := hentry m hp hf hpre hd hag
+  obtain ⟨o, hp', hs, hd', hag', hR⟩ :=
+    hbody k e le (Heap.union hp hl) hf m1 hd1 hag1 hPb
+  cases o with
+  | Normal _ _ _ => exact False.elim hR
+  | Break _ _ _ => exact False.elim hR
+  | Continue _ _ _ => exact False.elim hR
+  | Return v m' =>
+      refine ⟨v, m', hp', ?_, hR, hd', hag'⟩
+      have hs' : Steps (SStep ge fe) (.State f f.fn_body k e le m1)
+                   (.Returnstate v (callCont k) m') := hs
+      rw [hck] at hs'
+      exact Steps.step _ _ _ (Step.internal_function f vargs k m e le m1 hent) hs'
+  | Goto lbl' e' le' m' =>
+      by_cases hl' : lbl' = lbl
+      · subst hl'
+        have hG : G e' le' hp' := by
+          have hx : (if lbl' = lbl' then G else Assn.no) e' le' hp' := hR
+          rwa [if_pos rfl] at hx
+        have hst : gotoTarget f k lbl' e' le' m'
+            = .State f starget (kcont k) e' le' m' := by
+          unfold gotoTarget; rw [hck, hfind k]
+        obtain ⟨v, m'', hp2, hs2, hd2, hag2, hRet⟩ :=
+          htarget k hk e' le' hp' hf m' hd' hag' hG
+        refine ⟨v, m'', hp2, ?_, hRet, hd2, hag2⟩
+        refine Steps.step _ _ _ (Step.internal_function f vargs k m e le m1 hent) ?_
+        exact Steps.trans (hst ▸ hs) hs2
+      · have hx : (if lbl' = lbl then G else Assn.no) e' le' hp' := hR
+        rw [if_neg hl'] at hx
+        exact False.elim hx
+
+/-- **`inflate`'s shape**, packaged: the label covers a statement that falls
+    through, and the rest of the function body follows it under one `Kseq`. -/
+theorem satisfies_internal_goto_seq (ge fe f) (S : FunSpec) (vargs : List Val)
+    (Pbody G Q : Assn) (lbl : Ident) (starget tail : Stmt)
+    (hentry : ∀ (m : Mem) (hp hf : Heap), S.pre vargs hp → Heap.disjoint hp hf →
+        Heap.Agrees (Heap.union hp hf) m →
+        ∃ (e : Env) (le : TempEnv) (m1 : Mem) (hl : Heap),
+          fe f vargs m e le m1
+          ∧ Heap.disjoint (Heap.union hp hl) hf
+          ∧ Heap.Agrees (Heap.union (Heap.union hp hl) hf) m1
+          ∧ Pbody e le (Heap.union hp hl))
+    (hbody : Triple ge fe f Pbody f.fn_body
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := S.post,
+        goto := fun l => if l = lbl then G else Assn.no })
+    (hfind : ∀ kk : Cont, findLabel lbl f.fn_body kk = some (starget, .Kseq tail kk))
+    (hlabelled : Triple ge fe f G starget (.only Q))
+    (htail : Triple ge fe f Q tail
+      { normal := Assn.no, brk := Assn.no, cont := Assn.no, ret := S.post }) :
+    SatisfiesAt ge fe (.Internal f) S vargs := by
+  refine satisfies_internal_goto_lands ge fe f S vargs Pbody G lbl starget
+    (fun kk => .Kseq tail kk) hentry hbody hfind (fun kk hkk => ?_)
+  have hck : callCont kk = kk := callCont_of_isCallCont hkk
+  refine landsReturn_seq ge fe f G Q starget tail kk kk hlabelled ?_
+  have h := landsReturn_of_triple ge fe f (Ret := S.post) kk htail
+  rwa [hck] at h
+
 /-- **Resolving a `goto` that jumps BACKWARD, with a measure.**
 
     `inflate_fast`'s `dolen`/`dodist` jump *back* to a label above them, so the
