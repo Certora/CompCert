@@ -378,6 +378,85 @@ theorem mapsto_store {chunk : Chunk} {p : Permission} {b : Block} {ofs : _root_.
       rw [bytesPtsTo_none b p (encodeVal chunk v') ofs h' h'm bb oo (Or.inl hb)] at hc
       exact absurd hc (by simp)
 
+/-- **Writing into a run of owned bytes**, whose *old* contents need not encode
+    any value at all.  `mapsto_store` requires the window to be a `mapsto`, i.e.
+    to already hold `encodeVal chunk v` for some `v`; a freshly handed-over output
+    buffer is only `anyBytes`, and a `MemVal` run in general is not the encoding
+    of anything (an `Undef` byte, or a pointer fragment, is not).  The store
+    itself never looks at what was there, so the hypothesis is unnecessary — this
+    is `mapsto_store` with `encodeVal chunk v` generalised to any equal-length
+    byte list. -/
+theorem bytesPtsTo_store {chunk : Chunk} {p : Permission} {b : Block} {ofs : _root_.Int}
+    {bytes : List MemVal} {v' : Val} {h hf : Heap} {m : Mem}
+    (hpw : permOrder p .Writable = true)
+    (hal : ofs % alignChunk chunk = 0)
+    (hlen : bytes.length = sizeChunkNat chunk)
+    (hb : bytesPtsTo b p ofs bytes h)
+    (hd : Heap.disjoint h hf)
+    (hag : Heap.Agrees (Heap.union h hf) m) :
+    ∃ m' h', Mem.store chunk m b ofs v' = some m'
+           ∧ mapsto chunk p b ofs v' h'
+           ∧ Heap.disjoint h' hf
+           ∧ Heap.Agrees (Heap.union h' hf) m' := by
+  have hown := bytesPtsTo_ownsRange b p bytes ofs h hb
+  have hagh : Heap.Agrees h m := Heap.Agrees_union_left hag
+  have hlen' : (encodeVal chunk v').length = sizeChunkNat chunk := length_encodeVal chunk v'
+  have hsz : ((sizeChunkNat chunk : Nat) : _root_.Int) = sizeChunk chunk := by
+    cases chunk <;> simp [sizeChunkNat, sizeChunk]
+  have hrp := Heap.Agrees_rangePerm hagh hown .Cur
+  rw [hlen, hsz] at hrp
+  have hvaW : Mem.validAccess m chunk b ofs .Writable = true := by
+    simp only [Mem.validAccess, Bool.and_eq_true]
+    exact ⟨Mem.rangePerm_implies hrp hpw, by simp [hal]⟩
+  have hsome : (Mem.store chunk m b ofs v').isSome = true := by
+    unfold Mem.store; rw [hvaW]; simp
+  obtain ⟨m', hstore⟩ : ∃ m', Mem.store chunk m b ofs v' = some m' :=
+    ⟨_, (Option.some_get hsome).symm⟩
+  have hfnone : ∀ i : Nat, i < sizeChunkNat chunk → hf b (ofs + (i : _root_.Int)) = none := by
+    intro i hi
+    rcases hd b (ofs + (i : _root_.Int)) with hn | hn
+    · rw [hown i (by omega)] at hn; exact absurd hn (by simp)
+    · exact hn
+  obtain ⟨h', h'm⟩ := bytesPtsTo_exists b p (encodeVal chunk v') ofs
+  have hown' := bytesPtsTo_ownsRange b p (encodeVal chunk v') ofs h' h'm
+  refine ⟨m', h', hstore, pure_sep_intro hal h'm, ?_, ?_⟩
+  · intro bb oo
+    by_cases hbb : bb = b
+    · rw [hbb]
+      rcases window_split ofs oo (sizeChunkNat chunk) with ⟨i, hi, hoo⟩ | hout
+      · refine Or.inr ?_
+        rw [hoo]
+        exact hfnone i hi
+      · refine Or.inl (bytesPtsTo_none b p (encodeVal chunk v') ofs h' h'm b oo ?_)
+        rw [hlen']; exact Or.inr hout
+    · exact Or.inl (bytesPtsTo_none b p (encodeVal chunk v') ofs h' h'm bb oo (Or.inl hbb))
+  · have hagf : Heap.Agrees hf m' := Heap.Agrees_store_frame hstore
+      (Heap.Agrees_union_right hd hag) hfnone
+    refine Heap.Agrees_union ?_ hagf
+    intro bb oo c hc
+    by_cases hbb : bb = b
+    · rw [hbb] at hc ⊢
+      rcases window_split ofs oo (sizeChunkNat chunk) with ⟨i, hi, hoo⟩ | hout
+      · subst hoo
+        have hcell := hown' i (by rw [hlen']; exact hi)
+        rw [hcell] at hc
+        injection hc with hc
+        subst hc
+        have hpre := hagh b (ofs + (i : _root_.Int)) ⟨p, bytes[i]!⟩
+          (hown i (by rw [hlen]; exact hi))
+        refine ⟨?_, ?_, ?_⟩
+        · rw [Mem.store_access hstore]; exact hpre.1
+        · rw [Mem.store_access hstore]; exact hpre.2.1
+        · rw [Mem.store_contents hstore, PMap.gss]
+          exact Mem.setN_inside (encodeVal chunk v') ofs _ i (by rw [hlen']; exact hi)
+      · exfalso
+        rw [bytesPtsTo_none b p (encodeVal chunk v') ofs h' h'm b oo
+              (by rw [hlen']; exact Or.inr hout)] at hc
+        exact absurd hc (by simp)
+    · exfalso
+      rw [bytesPtsTo_none b p (encodeVal chunk v') ofs h' h'm bb oo (Or.inl hbb)] at hc
+      exact absurd hc (by simp)
+
 /-- **Overwriting a byte range.**  The `storebytes` sibling of `mapsto_store`,
     generalised from one chunk's bytes to an arbitrary equal-length list.  Needed
     because `Events.ExtcallMemcpySem` is stated over `loadbytes`/`storebytes`, not

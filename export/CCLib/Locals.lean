@@ -104,6 +104,71 @@ theorem anyBytes_split (p : Permission) (b : Block) (ofs : _root_.Int)
     rw [bytesPtsTo_append, hl1]
     exact ⟨h1, h2, hd, heq, hp1, hp2⟩
 
+/-- **Writing into an `anyBytes` window.**  The `anyBytes` form of
+    `mapsto_store`: the old contents are forgotten, so no assumption about them
+    is needed, and what comes back is a `mapsto` for the value just written. -/
+theorem anyBytes_store {chunk : Chunk} {p : Permission} {b : Block}
+    {ofs : _root_.Int} {v' : Val} {h hf : Heap} {m : Mem}
+    (hpw : permOrder p .Writable = true)
+    (hal : ofs % alignChunk chunk = 0)
+    (hm : anyBytes p b ofs (sizeChunkNat chunk) h)
+    (hd : Heap.disjoint h hf)
+    (hag : Heap.Agrees (Heap.union h hf) m) :
+    ∃ m' h', Mem.store chunk m b ofs v' = some m'
+           ∧ mapsto chunk p b ofs v' h'
+           ∧ Heap.disjoint h' hf
+           ∧ Heap.Agrees (Heap.union h' hf) m' := by
+  obtain ⟨bytes, hbb⟩ := hm
+  obtain ⟨hlen, hb⟩ := pure_sep_elim hbb
+  exact bytesPtsTo_store hpw hal hlen hb hd hag
+
+namespace Sep
+
+/-- **`*p = a2;` into a window the caller lent as raw bytes.**  `triple_assign`
+    wants the target to be a `mapsto`, i.e. to already hold the encoding of some
+    value; `inflate`'s output buffer is only `anyBytes` (the caller promises the
+    bytes are writable, nothing about their contents), and a general `MemVal` run
+    is not the encoding of anything.  The store never reads the old bytes, so the
+    weaker footprint suffices. -/
+theorem triple_assign_any (ge fe f) (P Q : Assn) (a1 a2 : Expr) (chunk : Chunk)
+    (p : Permission) (b : Block) (ofs : Integers.Ptrofs)
+    (hpw : permOrder p .Writable = true)
+    (hacc : accessMode (typeof a1) = .By_value chunk)
+    (hsplit : ∀ e le hp m, P e le hp → Heap.Agrees hp m →
+        ∃ vnew h1 h2,
+          Heap.disjoint h1 h2 ∧ hp = Heap.union h1 h2
+          ∧ anyBytes p b (Integers.Ptrofs.unsigned ofs) (sizeChunkNat chunk) h1
+          ∧ Integers.Ptrofs.unsigned ofs % alignChunk chunk = 0
+          ∧ EvalLvalue ge e le m a1 b ofs .Full
+          ∧ (∃ v2, EvalExpr ge e le m a2 v2
+                   ∧ Cop.semCast v2 (typeof a2) (typeof a1) m = some vnew)
+          ∧ (∀ h1', mapsto chunk p b (Integers.Ptrofs.unsigned ofs) vnew h1' →
+                Heap.disjoint h1' h2 → Q e le (Heap.union h1' h2))) :
+    Triple ge fe f P (.Sassign a1 a2) (.only Q) := by
+  intro k e le hp hf m hd hag hP
+  obtain ⟨vnew, h1, h2, hd12, heq, hany, hal, hlv, ⟨v2, hev2, hcast⟩, hQ⟩ :=
+    hsplit e le hp m hP (Heap.Agrees_union_left hag)
+  subst heq
+  rw [Heap.disjoint_union_left] at hd
+  have hd1 : Heap.disjoint h1 (Heap.union h2 hf) := by
+    rw [Heap.disjoint_union_right]; exact ⟨hd12, hd.1⟩
+  have hag1 : Heap.Agrees (Heap.union h1 (Heap.union h2 hf)) m := by
+    rw [← Heap.union_assoc]; exact hag
+  obtain ⟨m', h1', hstore, hm1', hd1', hag1'⟩ :=
+    anyBytes_store (v' := vnew) hpw hal hany hd1 hag1
+  rw [Heap.disjoint_union_right] at hd1'
+  refine ⟨.Normal e le m', Heap.union h1' h2, ?_, ?_, ?_, ?_⟩
+  · exact Steps.one (Step.assign f a1 a2 k e le m b ofs .Full v2 vnew m' hlv hev2 hcast
+      (AssignLoc.value vnew chunk m' hacc (by
+        show Mem.store chunk m b (Integers.Ptrofs.unsigned ofs) vnew = some m'
+        exact hstore)))
+  · rw [Heap.disjoint_union_left]; exact ⟨hd1'.2, hd.2⟩
+  · show Heap.Agrees (Heap.union (Heap.union h1' h2) hf) m'
+    rw [Heap.union_assoc]; exact hag1'
+  · exact hQ h1' hm1' hd1'.1
+
+end Sep
+
 /-- The direction a use site needs after the copy: concrete bytes weaken into
     `anyBytes`.  Just supplying the witness. -/
 theorem anyBytes_of_bytesPtsTo {p : Permission} {b : Block} {ofs : _root_.Int}
