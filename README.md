@@ -1,3 +1,8 @@
+> **⚠️ Warning: this is an experimental fork.** It extends CompCert 3.17 with a
+> `-lean` backend for `clightgen` and a Lean 4 formalization of Clight. 
+> This work is under active development and is not part of the official 
+> CompCert distribution.
+
 # CompCert
 The formally-verified C compiler.
 
@@ -15,6 +20,17 @@ For more information on CompCert (supported platforms, supported C
 features, installation instructions, using the compiler, etc), please
 refer to the [Web site](https://compcert.org/) and especially
 the [user's manual](https://compcert.org/man/).
+
+## Experimental: C to Lean 4 (`export/`)
+
+This fork adds a `-lean` backend to `clightgen` (see the `export/` directory).
+It exports a C program's Clight abstract syntax as Lean 4, and comes with a
+Lean 4 port of the Clight operational semantics, an executable interpreter, and a separation-logic program logic for proving
+properties of the exported C code.
+
+This work is **experimental and under active development**: interfaces,
+file layout and proof libraries may change without notice. See
+`export/LEAN.md` for a full description.
 
 ## License
 CompCert is not free software.  This non-commercial release can only
