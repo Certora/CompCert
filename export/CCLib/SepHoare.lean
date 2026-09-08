@@ -17,8 +17,8 @@
   is provably untouched.  `triple_frame` then falls out of union associativity.
 
   This file lives in `namespace CC.Sep` alongside the old `CC` Hoare logic rather
-  than replacing it, so the build stays green: Phase 7.7 migrates
-  `IsSortedReal.lean` and retires the non-separating version.
+  than replacing it, so both remain available; `examples/IsSortedReal.lean` uses the former and
+  `examples/IsSortedSep.lean` the latter.
 -/
 import CCLib.SepLogic
 import CCLib.Hoare
@@ -51,8 +51,8 @@ structure ExitConds where
   ret : Val → HProp
   /-- **Wave E**: one assertion per label the statement may jump to.  The field
       carries a **default**, so every `ExitConds` literal written before Wave E
-      still elaborates unchanged — 21 of them across this file, `Funspec`,
-      `IsSortedReal`, `IsSortedSep` and `ZAdler32`.  That is what kept the
+      still elaborates unchanged — 21 of them across this file, `Funspec` and
+      the example proofs.  That is what kept the
       `Outcome` extension to 14 match arms instead of a file-wide rewrite.
       (`Sep.Assn.no` is defined just below, so the default is spelled out.) -/
   goto : Ident → Assn := fun _ _ _ _ => False
@@ -667,8 +667,8 @@ def oneField (cenv : CompositeEnv) (ms : List Member) (ofs : Z)
   | _ => ⌜False⌝
 
 /-- Unfold `oneField` at a use site, given the offset fact — which should come
-    from the struct's **batched offset table** (one `decide` per struct, see
-    `DeflateMeasure`), never from a per-site `decide`. -/
+    from the struct's **batched offset table** (one `decide` per struct), never
+    from a per-site `decide`. -/
 theorem oneField_eq {cenv : CompositeEnv} {ms : List Member} {delta : Z}
     {fp : FieldPred} (ofs : Z)
     (hoff : fieldOffset cenv fp.1 ms = .OK (delta, .Full)) :
@@ -973,7 +973,7 @@ theorem eval_index_lvalue {ge : CGenv} {e : Env} {le : TempEnv} {m : Mem}
 
 /-! ## `Evar`, packaged
 
-Both cases were being rebuilt inline at every use site (`LocalVarSep` does it
+Both cases were being rebuilt inline at every use site (`examples/LocalVarSep.lean` does it
 twice).  They are one-liners; the point of naming them is that a client reading
 `Evar _count` / `Evar _lbase` should not have to remember which constructor and
 which side conditions each needs. -/

@@ -160,7 +160,7 @@ def ExitConds.only (Q : Assn) : ExitConds :=
 
 SUPERSEDED (Phase 7.4) by `CCLib/SepHoare.lean`, which carries a heap frame and
 so admits a frame rule and a call rule.  Everything from here down is kept
-because `IsSortedReal.lean` still uses it and because the two are worth
+because `examples/IsSortedReal.lean` still uses it and because the two are worth
 comparing; new proofs should use `CC.Sep`.
 
 Note the *infrastructure* above — `Steps`, `SStep`, `EntryRel`, `Outcome`,

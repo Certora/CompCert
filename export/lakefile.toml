@@ -1,87 +1,19 @@
 name = "compcert-clight-lean"
 # Lake project for the Lean side of the `clightgen -lean` work.
 #
-#   CCLib         : Phase 0 foundations — Archi, machine integers on BitVec,
-#                   floats by bit pattern.  CCLib.Integers is validated against
-#                   CompCert's own lib/Integers.v by test/lean/int_diff.sh.
-#   Clightdefs    : the Clight AST (mirror of Clightdefs.v / Ctypesdefs.v),
-#                   built on CCLib.
-#   Demo          : a representative generated file (every construct)
-#   GenMain       : the generated AST of main.c (contains f_is_sorted)
-#   ClightSem     : a small big-step model for a Clight fragment.  TOY — not
-#                   CompCert's semantics; slated for replacement (Phases 3-4).
-#   MemCheck      : non-vacuity checks for the Phase-7.1 memory lemma library
-#                   (all by `decide`, so axiom-free)
-#   SepCheck      : usability checks for the Phase-7.5 closure theorem
-#                   (self-recursion and mutual recursion both close), plus the
-#                   Phase-9 Step-5 memcpy spec (satisfiable, and reachable at
-#                   al = 1)
-#   SemCheck      : sanity checks for the Phase-3 semantics (init_mem runs on a
-#                   generated program; the Step relation is inhabited)
-#   RunMain       : executes the program generated from main.c (Phase-4 interpreter)
-#   RunIsSorted   : runs the generated is_sorted on concrete arrays
-#   IsSortedProof : is_sorted returns 1 on sorted input, under ClightSem.
-#                   SUPERSEDED by IsSortedReal (kept for comparison).
-#   IsSortedReal  : the Phase-6 milestone — the SAME theorem against the real
-#                   Clight semantics, via the Hoare logic in CCLib.Hoare.
-#   GenStruct     : generated AST of test/lean/structs2.c (struct field access)
-#   StructSep     : a struct field read, via structAt / fieldsAt_split
-#   GenSwap       : generated AST of test/lean/swap.c (the smallest WRITING program)
-#   SwapSep       : swap proved with the separation logic — exercises
-#                   triple_assign / mapsto_store, and the frame rule
-#   IsSortedSep   : the Phase-7.7 milestone — the SAME theorem again, now with the
-#                   SEPARATION logic: is_sorted meets a FunSpec, so it is callable
-#                   via Sep.triple_call and the frame rule applies.
-#   IsSortedRealCheck : discharges IsSortedReal's hypotheses for a concrete
-#                   3-element array, so the milestone is provably non-vacuous.
-#   GenAdler32    : generated AST of zlib-1.3.2's adler32.c
-#   ZAdler32      : Phase-9 Step 0 (calibration) — a Lean model of Adler-32 and
-#                   the `len == 1` fast path of adler32_z proved against it
-#   ZAdler32Check : non-vacuity for that spec, plus validation of the model
-#                   against the published adler32("Wikipedia") value.  The model
-#                   is also checked against zlib's own adler32 by
-#                   test/lean/adler_diff.sh (200 random buffers).
-#   DetermCheck   : non-vacuity for CCLib.Determinism — determinism APPLIED to
-#                   derivable steps (a determinism theorem is trivially true of
-#                   an empty relation), plus the axiom guard for the two new
-#                   extcall_properties axioms
-#   TempsCheck    : Phase-9 Step 10 — the tracked-temporary state layer
-#                   (CCLib.Temps) is O(1) per statement, checked at 20 temps
-#   GenFuncPtr    : generated AST of test/lean/funcptr.c
-#   GenDeflate    : generated AST of zlib-1.3.2's deflate.c (21,427 lines; 3.3 s)
-#   DeflateMeasure: Phase-9 Wave-A measurement — the REAL 52-field deflate_state
-#                   predicate, timed.  Its conclusions (extraction is free, field
-#                   offsets must be batched) set Wave B's design.
-#   GenTreeSep    : generated AST of test/lean/treesep.c — compiled against
-#                   zlib's REAL deflate.h, so the layout is deflate_state's own
-#   TreeSep       : Phase-9 Wave-B item 6 — s->dyn_ltree[k].Freq READ and
-#                   WRITTEN end to end.  The write was impossible before Wave B
-#                   (no array split/join existed).
-#   GenZ*         : the remaining seven zlib round-trip modules (compress,
-#                   uncompr, inflate, trees, inftrees, inffast, zutil), each in
-#                   its own namespace so they can be imported together
-#   ZLink         : Phase-9 Step 1 (Wave C) — all nine zlib translation units
-#                   linked into ONE Program via CCLib.Linking, with the
-#                   cross-module calls shown to resolve to Internal bodies
-#   GenLocalVar   : generated AST of test/lean/localvar.c (a stack-allocated
-#                   struct local — the compress2/uncompress2 shape)
-#   LocalVarSep   : Phase-9 Wave-D item 6 — entry/exit resource transfer for a
-#                   function with fn_vars, exercised end to end
-#   GenGotoLeave  : generated AST of test/lean/gotoleave.c (inflate's control
-#                   shape: a loop bailing out to one top-level cleanup label)
-#   GotoSep       : Phase-9 Wave-E item 4 — the forward-goto rules exercised on it
-#   GenGotoBack   : generated AST of test/lean/gotoback.c (inffast's shape: a
-#                   loop built from a BACKWARD goto, no Sloop at all)
-#   GotoBackSep   : Phase-9 Wave-E item 6 — the measure-carrying backward-goto
-#                   rule exercised on it
-#   FuncPtrSep    : Phase-9 Step 7 — calls through function pointers, in all
-#                   three shapes clightgen emits (direct, via a temporary, and
-#                   `(*p)(…)` through a struct field, which is zlib's ZALLOC).
-#                   `apply_satisfies` is higher-order: correct for ANY callee
-#                   meeting a spec.
+#   CCLib       : the Clight semantics, interpreter, memory model and
+#                 separation logic (see LEAN.md)
+#   Clightdefs  : the module every `clightgen -lean` output imports
+#   Examples    : examples/ — generated test programs (Gen*), the proofs about
+#                 them (*Sep, IsSorted*), and the non-vacuity / axiom checks
+#                 (*Check).  Regression tests for the library and templates
+#                 for new proofs; nothing outside examples/ depends on them.
+#
+# DiffRun.lean is not a library: test/lean/diff_exec.sh compiles it directly
+# against each generated program.
 #
 # Build with:  lake build
-defaultTargets = ["CCLib", "Clightdefs", "Demo", "GenMain", "ClightSem", "IsSortedProof", "IsSortedReal", "IsSortedSep", "GenSwap", "SwapSep", "GenStruct", "StructSep", "IsSortedRealCheck", "MemCheck", "SepCheck", "SemCheck", "RunMain", "RunIsSorted", "GenAdler32", "ZAdler32", "ZAdler32Check", "TempsCheck", "GenFuncPtr", "FuncPtrSep", "GenDeflate", "DeflateMeasure", "GenTreeSep", "TreeSep", "GenZCompress", "GenZUncompr", "GenZInflate", "GenZTrees", "GenZInftrees", "GenZInffast", "GenZZutil", "ZLink", "GenLocalVar", "LocalVarSep", "GenGotoLeave", "GotoSep", "GenGotoBack", "GotoBackSep", "InflateMeasure", "ZConfigAudit", "ZAdlerMath", "ZAdlerLoop", "GenStructCopy", "StructCopySep", "GenU16Loop", "U16LoopSep", "GenOOB", "OOBSep", "DetermCheck"]
+defaultTargets = ["CCLib", "Clightdefs", "Examples"]
 
 [[lean_lib]]
 name = "CCLib"
@@ -90,154 +22,6 @@ name = "CCLib"
 name = "Clightdefs"
 
 [[lean_lib]]
-name = "Demo"
-
-[[lean_lib]]
-name = "GenMain"
-
-[[lean_lib]]
-name = "ClightSem"
-
-[[lean_lib]]
-name = "IsSortedProof"
-
-[[lean_lib]]
-name = "IsSortedReal"
-
-[[lean_lib]]
-name = "GenStruct"
-
-[[lean_lib]]
-name = "StructSep"
-
-[[lean_lib]]
-name = "GenSwap"
-
-[[lean_lib]]
-name = "SwapSep"
-
-[[lean_lib]]
-name = "IsSortedSep"
-
-[[lean_lib]]
-name = "IsSortedRealCheck"
-
-[[lean_lib]]
-name = "MemCheck"
-
-[[lean_lib]]
-name = "SepCheck"
-
-[[lean_lib]]
-name = "SemCheck"
-
-[[lean_lib]]
-name = "RunMain"
-
-[[lean_lib]]
-name = "RunIsSorted"
-
-[[lean_lib]]
-name = "GenAdler32"
-
-[[lean_lib]]
-name = "ZAdler32"
-
-[[lean_lib]]
-name = "ZAdler32Check"
-
-[[lean_lib]]
-name = "TempsCheck"
-
-[[lean_lib]]
-name = "DetermCheck"
-
-[[lean_lib]]
-name = "GenFuncPtr"
-
-[[lean_lib]]
-name = "FuncPtrSep"
-
-[[lean_lib]]
-name = "GenDeflate"
-
-[[lean_lib]]
-name = "DeflateMeasure"
-
-[[lean_lib]]
-name = "GenTreeSep"
-
-[[lean_lib]]
-name = "TreeSep"
-
-[[lean_lib]]
-name = "GenZCompress"
-
-[[lean_lib]]
-name = "GenZUncompr"
-
-[[lean_lib]]
-name = "GenZInflate"
-
-[[lean_lib]]
-name = "GenZTrees"
-
-[[lean_lib]]
-name = "GenZInftrees"
-
-[[lean_lib]]
-name = "GenZInffast"
-
-[[lean_lib]]
-name = "GenZZutil"
-
-[[lean_lib]]
-name = "ZLink"
-
-[[lean_lib]]
-name = "GenLocalVar"
-
-[[lean_lib]]
-name = "LocalVarSep"
-
-[[lean_lib]]
-name = "GenGotoLeave"
-
-[[lean_lib]]
-name = "GotoSep"
-
-[[lean_lib]]
-name = "GenGotoBack"
-
-[[lean_lib]]
-name = "GotoBackSep"
-
-[[lean_lib]]
-name = "InflateMeasure"
-
-[[lean_lib]]
-name = "ZConfigAudit"
-
-[[lean_lib]]
-name = "ZAdlerMath"
-
-[[lean_lib]]
-name = "ZAdlerLoop"
-
-[[lean_lib]]
-name = "GenStructCopy"
-
-[[lean_lib]]
-name = "StructCopySep"
-
-[[lean_lib]]
-name = "GenU16Loop"
-
-[[lean_lib]]
-name = "U16LoopSep"
-
-[[lean_lib]]
-name = "GenOOB"
-
-[[lean_lib]]
-name = "OOBSep"
+name = "Examples"
+srcDir = "examples"
+roots = ["Demo", "GenMain", "GenSwap", "GenStruct", "GenStructCopy", "GenLocalVar", "GenFuncPtr", "GenGotoLeave", "GenGotoBack", "GenU16Loop", "GenOOB", "IsSortedReal", "IsSortedSep", "SwapSep", "StructSep", "StructCopySep", "LocalVarSep", "FuncPtrSep", "GotoSep", "GotoBackSep", "U16LoopSep", "OOBSep", "MemCheck", "SepCheck", "DetermCheck", "TempsCheck"]

@@ -2,8 +2,7 @@
   Usability check for the Phase-9 Step-10 temporary-state layer
   (`CCLib.Temps`).
 
-  The claim being tested is not "the proofs got shorter" (they did, by ~19 % on
-  `ZAdler32`) but the *asymptotic* one: a statement's proof obligation is now
+  The claim being tested is the *asymptotic* one: a statement's proof obligation is
   **O(1) in the number of tracked temporaries** instead of O(N).  So the check is
   a `Sset` step over a deliberately long tracked list, discharged by exactly the
   same two one-liners as a step over a two-entry list.  If the cost were still
@@ -18,15 +17,38 @@
   `setLocal` rather than written out, so an N-assignment chain costs N `EvalExpr`
   obligations and no tracked lists at all.
 -/
-import GenAdler32
 import CCLib
 open CC CC.Sep CC.HProp
-open Adler32   -- the generated module now lives in its own namespace
 
 namespace TempsCheck
 
-/-- Twenty tracked temporaries — more than any single point of `adler32_z`
-    tracks, and in the range `inflate`/`deflate` will need.
+/-! Identifiers in the shape `clightgen -lean` emits: named C variables through
+    `identOfString`, `-normalize` temporaries as consecutive positives. -/
+def _adler : Ident := identOfString "adler"
+def _buf : Ident := identOfString "buf"
+def _len : Ident := identOfString "len"
+def _n : Ident := identOfString "n"
+def _sum2 : Ident := identOfString "sum2"
+def _t'1 : Ident := (Positive.ofNat 128)
+def _t'2 : Ident := (Positive.ofNat 129)
+def _t'3 : Ident := (Positive.ofNat 130)
+def _t'4 : Ident := (Positive.ofNat 131)
+def _t'5 : Ident := (Positive.ofNat 132)
+def _t'6 : Ident := (Positive.ofNat 133)
+def _t'7 : Ident := (Positive.ofNat 134)
+def _t'8 : Ident := (Positive.ofNat 135)
+def _t'9 : Ident := (Positive.ofNat 136)
+def _t'10 : Ident := (Positive.ofNat 137)
+def _t'11 : Ident := (Positive.ofNat 138)
+def _t'12 : Ident := (Positive.ofNat 139)
+def _t'13 : Ident := (Positive.ofNat 140)
+def _t'14 : Ident := (Positive.ofNat 141)
+def _t'15 : Ident := (Positive.ofNat 142)
+def _t'16 : Ident := (Positive.ofNat 143)
+def _t'17 : Ident := (Positive.ofNat 144)
+
+/-- Twenty tracked temporaries — more than a typical function tracks at any one
+    point.
 
     `abbrev`, not `def`: the tactics work on the list's *structure*, so a named
     tracked list has to be reducible (noted in `CCLib.Temps`). -/
@@ -44,9 +66,8 @@ example (b : Block) (ofs0 : Integers.Ptrofs) :
     (∀ q ∈ wide b ofs0, q ∈ wide b ofs0) ∧ (∀ q ∈ wide b ofs0, q.1 ≠ _sum2) :=
   ⟨by temps_mem, by temps_ne⟩
 
-/-- A whole `Sset` step at twenty tracked temporaries.  Compare the body with
-    any `tr_*` step in `ZAdler32`: identical shape, and it would be identical at
-    a hundred temporaries. -/
+/-- A whole `Sset` step at twenty tracked temporaries: the same shape as a step
+    over two, and it would be identical at a hundred. -/
 example (ge : CGenv) (fe : EntryRel) (f : Function) (b : Block)
     (ofs0 : Integers.Ptrofs) (H : HProp) (v : Integers.Int64) :
     Sep.Triple ge fe f (Sep.LocalSt emptyEnv (wide b ofs0) H)
@@ -80,7 +101,7 @@ example : _t'17 ≠ _t'7 := by decide
 The Step-10 layer made a single step O(1) in the number of tracked temporaries.
 What it did *not* do was make a **chain** of steps cheap: `triple_seq_fwd` takes
 its mid-condition explicitly, so an N-assignment chain cost N tracked lists
-written out by hand.  `ZAdlerLoop.work_step` measured that at 117 of 356 lines.
+written out by hand.
 
 `localst_fwd` (`CCLib.Temps`) closes it: `setLocal` computes the post-state, so
 `triple_set_local`'s `hsub`/`hne` become theorems and a chain leaves exactly one

@@ -3,7 +3,7 @@
 
   ## The problem this solves
 
-  In `IsSortedSep`/`SwapSep`/`ZAdler32` the local state was a hand-written
+  In the early example proofs (`IsSortedSep`, `SwapSep`) the local state was a hand-written
   conjunction, one `le.get id = some v` per tracked temporary, so every `Sset`
   proof re-established each conjunct with its own `PTree.gso` and its own named
   disequality:
@@ -129,8 +129,9 @@ theorem triple_set_local (ge fe f) (E : Env) (l₀ l : List (Ident × Val)) (H :
 
 `triple_set_local` above makes the **caller** supply the pruned list `l` and
 prove `hsub`/`hne` about it.  That is what makes a chain of assignments expensive:
-`ZAdlerLoop.work_step` spent 117 of its 356 lines writing out five mid-condition
-lists, each repeating the invariant's entries, with two side conditions apiece.
+a loop body with five assignments spent a third of its proof writing out
+mid-condition lists, each repeating the invariant's entries, with two side
+conditions apiece.
 
 The fix is not a tactic but a definition.  If the pruned list is **computed** from
 `l₀` and `id`, then `hsub` and `hne` stop being obligations and become theorems,
@@ -267,7 +268,7 @@ theorem triple_seq_fwd (ge fe f) (P Q : Assn) (R : ExitConds) (s1 s2 : Stmt)
 
 **Usage constraint:** a named tracked list must be an `abbrev`, not a `def`.
 Both tactics below work on the list's *structure* (`simp`/`decide` over the
-conses), so an irreducible name blocks them.  `TempsCheck.lean` pins this. -/
+conses), so an irreducible name blocks them.  `examples/TempsCheck.lean` pins this. -/
 
 /-- Discharges `∀ p ∈ l, p.1 ≠ id` for a concrete tracked list.
 

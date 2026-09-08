@@ -19,8 +19,8 @@
   `goto inf_leave` in the C source (37 in Clight, the `NEEDBITS`/`PULLBYTE` macros
   each carrying one), one label at `inflate.c:1131`.
 
-  Proved here, on the `n = 0` path (the `ZAdler32` precedent — one concrete path
-  end to end, so the arithmetic stays out of the way of the control flow):
+  Proved here, on the `n = 0` path (one concrete path end to end, so the
+  arithmetic stays out of the way of the control flow):
 
   * `label_resolves` — the label resolves at **any** continuation, by `rfl`.  This
     is `satisfies_internal_goto`'s `hfind`, and the fact that it is `rfl` is what

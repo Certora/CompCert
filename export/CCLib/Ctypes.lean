@@ -264,7 +264,7 @@ inductive Member where
   | Member_bitfield (id : Ident) (sz : IntSize) (sg : Signedness) (a : Attr)
                     (width : Z) (padding : Bool)
   -- `DecidableEq` (not derivable for `Ty` itself, but usable here) is needed to
-  -- state concrete `composite_env` facts; see `StructSep.lean`.
+  -- state concrete `composite_env` facts; see `examples/StructSep.lean`.
   deriving DecidableEq
 
 instance : Inhabited Member := ⟨Member.Member_plain Positive.xH Ty.Tvoid⟩

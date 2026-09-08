@@ -118,7 +118,7 @@ theorem triple_call (ge fe f) (S : FunSpec) (optid : Option Ident)
 
 /-- Deriving `SatisfiesAt` from a triple for the body, for a function with no
     block-scoped variables — so `function_entry` leaves memory alone.  This is the
-    pattern `is_sorted_call` follows by hand in `IsSortedReal.lean`, generalized.
+    pattern `is_sorted_call` follows by hand in `examples/IsSortedReal.lean`, generalized.
 
     For a function *with* `fn_vars` the entry allocates, and the fresh block has
     to be turned into owned cells; that is the resource-transfer step deferred in
